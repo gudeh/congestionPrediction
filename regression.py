@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter #Graphical visualization
+#from maskedtensor import masked_tensor
 
 import dgl
 from dgl.data import DGLDataset
@@ -46,7 +47,7 @@ labelName = 'routingHeat' #'label'
 secondLabel = 'placementHeat'
 #featName = 'feat'
 #labelName = 'label'
-numEpochs = 10
+numEpochs = 120
 
 
 def preProcessData( listDir ):
@@ -194,54 +195,46 @@ class DataSetFromYosys( DGLDataset ):
 		print( "#########################################\n\n\n" )
 		nodes_data = pd.read_csv( designPath / 'preProcessedGatesToHeat.csv' )
 		edges_data  = pd.read_csv( designPath / 'DGLedges.csv')
-		#        edges_data = pd.read_csv( designPath / 'preProcessedDGLedges.csv')
 		edges_src  = torch.from_numpy( edges_data['Src'].to_numpy() )
 		edges_dst  = torch.from_numpy( edges_data['Dst'].to_numpy() )
 
 
 		df = nodes_data[ listFeats + [ labelName ] ]
-		#df_wanted = df_wanted[ df_wanted < 0 ]
-		#df_wanted[ df_wanted != 0 ] = True
-		print("np.where( df[ rawFeatName ] > 0, True, False ):\n", np.where( df[ rawFeatName ] > 0, True, False ).shape, "\n", np.where( df[ rawFeatName ] > 0, True, False ) )
+		#print("np.where( df[ rawFeatName ] > 0, True, False ):\n", np.where( df[ rawFeatName ] > 0, True, False ).shape, "\n", np.where( df[ rawFeatName ] > 0, True, False ) )
 		df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] > 0, True, False ) )
+		df_wanted = np.invert( df_wanted )
+#		df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, False, True ), np.where( df[ labelName ] > 0, False, True ) )
 		removedNodesMask = torch.tensor( df_wanted )
 		print( "removedNodesMask:", removedNodesMask.shape, "\n", removedNodesMask )
-		print("nodes_data:\n", nodes_data)
+		print( "nodes_data:\n", nodes_data)
+		idsToRemove = torch.tensor( nodes_data[ "id" ] )[ removedNodesMask ]
+		
+		torch.set_printoptions( profile="full" )
+		print( "idsToRemove:", idsToRemove.shape, "\n", idsToRemove )
+		torch.set_printoptions( profile="default" )
 		
 		for feat in listFeats:
 			print( "nodes_data[",feat,"]:\n", nodes_data[ feat ] )			
-	#		print("nodes_data[ featName ]:\n", nodes_data[ featName ])
-		self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] ) #TODO int problem fix here
-		#self.graph.ndata[ featName ] = ( torch.from_numpy( nodes_data[ featName ].to_numpy() ) ).int()
-		#for feat in listFeats:
+		self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] ) 
+
 		self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ listFeats ].values )
-
-		print( "self.graph.ndata[ ",featName," ]:\n", self.graph.ndata[ featName ] )
-		#self.graph.ndata['conCount'] = torch.from_numpy(nodes_data['conCount'].to_numpy())        #TODO possible feature, needs fix in yosys
-
 		self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )#.float()
 		self.graph.ndata[ secondLabel ] = ( torch.from_numpy ( nodes_data[ secondLabel ].to_numpy() ) )#.float()        
-		#        self.graph.ndata['powerHeat'] = torch.from_numpy (nodes_data['powerHeat'].to_numpy()).float()
-		#        self.graph.ndata['irDropHeat'] = torch.from_numpy (nodes_data['irDropHeat'].to_numpy()).float()
+#		self.graph.ndata['powerHeat'] = torch.from_numpy (nodes_data['powerHeat'].to_numpy()).float()
+#        self.graph.ndata['irDropHeat'] = torch.from_numpy (nodes_data['irDropHeat'].to_numpy()).float()
+#		self.graph.ndata['conCount'] = torch.from_numpy(nodes_data['conCount'].to_numpy())        #TODO possible feature, needs fix in yosys
 
 
-	#		removedNodesMask = torch.where( self.graph.ndata[ labelName ] != -1, True, False) #torch.zeros(n_nodes, dtype=torch.bool)
+##		print( "before mask self.graph.ndata[ ",featName," ]:", self.graph.ndata[ featName ].shape, "\n", self.graph.ndata[ featName ] )
+#		aux =  torch.tensor( nodes_data[ listFeats ].values )
+#		print( "before mask self.graph.ndata.. aux", aux.shape, "\n", aux )
+#		self.graph.ndata['removedNodesMask'] = removedNodesMask.repeat( 1, 2 )
+#		print( "MASK", self.graph.ndata['removedNodesMask'].shape, "\n", self.graph.ndata['removedNodesMask'] )
+#		self.graph.ndata[ featName ] =  masked_tensor( aux, torch.unsqueeze( removedNodesMask, -1 ) )
+#		print( "after mask self.graph.ndata[ ",featName," ]:", self.graph.ndata[ featName ].shape, "\n", self.graph.ndata[ featName ] )
 
-#		featRemover = torch.tensor
-#		for f in listFeats:
-#			featRemover = torch.logical_and( featRemover, torch.where( self.graph.ndata[ f ] != -1, True, False) )
-#		removedNodesMask =  torch.logical_and( torch.where( self.graph.ndata[ labelName ] != -1, True, False), featRemover )
+		self.graph.remove_nodes( idsToRemove )
 
-		#removedNodesMask =  torch.logical_and( torch.where( self.graph.ndata[ labelName ] != -1, True, False), torch.where( self.graph.ndata[ featName ][0] != -1, True, False) )
-		
-		#        val_mask = #torch.zeros(n_nodes, dtype=torch.bool)
-		#        test_mask = #torch.zeros(n_nodes, dtype=torch.bool)
-
-		#        val_mask[n_train : n_train + n_val] = True
-		#        test_mask[n_train + n_val :] = True
-		self.graph.ndata['removedNodesMask'] = removedNodesMask
-		#        self.graph.ndata["val_mask"] = val_mask
-		#        self.graph.ndata["test_mask"] = test_mask
 		return self.graph
 		   
 	def __getitem__( self, i ):
@@ -323,13 +316,13 @@ class GAT( nn.Module ):
 		return h
 
  
-def evaluate( g, features, labels, model, mask ):
+def evaluate( g, features, labels, model ):#, mask ):
 	model.eval()
 	with torch.no_grad():
 		#features = features[ mask ]
 		if( features.dim() == 1 ):
 			features = features.unsqueeze(1)
-		labels = labels[ mask ]
+		#labels = labels[ mask ]
 		print( "\t>>> features in evaluate:", type( features ), features.shape, "\n", features )
 		print( "\t>>> labels   in evaluate:", type( labels ),   labels.shape, "\n", labels )
 
@@ -338,7 +331,7 @@ def evaluate( g, features, labels, model, mask ):
 		#r2 = r2_score( labels.data.cpu.numpy(), output ) 
 		print("\t>>>> output before squeeze:", type(output), output.shape, "\n", output )
 		output = output.squeeze(1)
-		output = output[ mask ]
+		#output = output[ mask ]
 		print("\t>>>> output after squeeze:", type(output), output.shape, "\n", output )
              
 		kendall = KendallRankCorrCoef()
@@ -350,13 +343,13 @@ def evaluate( g, features, labels, model, mask ):
 def evaluate_in_batches(dataloader, device, model):
     total_score = 0
     for batch_id, batched_graph in enumerate(dataloader):
-        mask = batched_graph.ndata[ 'removedNodesMask' ]
+#        mask = batched_graph.ndata[ 'removedNodesMask' ]
         batched_graph = batched_graph.to( device )
         features = batched_graph.ndata[ featName ].float()
         labels = batched_graph.ndata[ labelName ] #.float()
 #        print("features in evaluate_in_batches:", type(features), features.shape,"\n", features )
 #        print("labels in evaluate_in_batches:", type(labels), labels.shape,"\n", labels )
-        score = evaluate( batched_graph, features, labels, model, mask )
+        score = evaluate( batched_graph, features, labels, model )#, mask )
         total_score += score
     return total_score / (batch_id + 1) # return average score
 
@@ -384,7 +377,7 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
 #            print("->batched_graph",batched_graph)			
 #            print("\t%%%% Batch ID ", batch_id )
             features = batched_graph.ndata[ featName ].float()
-            removedNodesMask = batched_graph.ndata[ 'removedNodesMask' ]
+#            removedNodesMask = batched_graph.ndata[ 'removedNodesMask' ]
             if( features.dim() == 1 ):
 #                print("\n\n\nUNSQUEZING\n\n\n")
                 features = features.float().unsqueeze(1)
@@ -399,8 +392,8 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
 
 #            print("->labels in train:",type(labels),labels.shape)
 #            print("\n",labels)
-#            loss = loss_fcn( logits, labels )
-            loss = loss_fcn( logits[ removedNodesMask ], labels[ removedNodesMask ] )
+            loss = loss_fcn( logits, labels )
+#            loss = loss_fcn( logits[ removedNodesMask ], labels[ removedNodesMask ] )
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
