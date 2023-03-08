@@ -172,8 +172,8 @@ struct heatBbox{
 //Using netbeans to compile on proper folder. Original: ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/gatetoheat
 int main(int argc, char** argv) {
 
-    //TODO: p is analogous to "./myStuff/myDataSet/, no need for loop
-    string root="./myStuff";
+    //TODO: p is analogous to "./congestionPrediction/myDataSet/, no need for loop
+    string root="./congestionPrediction";
     vector<string> all_projects;
     vector<string> projectWithErrors;
     for( auto& p : filesystem::directory_iterator( root ) )
