@@ -172,13 +172,13 @@ struct heatBbox{
 //Using netbeans to compile on proper folder. Original: ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/gatetoheat
 int main(int argc, char** argv) {
 
-    //TODO: p is analogous to "./congestionPrediction/myDataSet/, no need for loop
-    string root="./congestionPrediction";
+    string root="./congestionPrediction/dataset";
     vector<string> all_projects;
     vector<string> projectWithErrors;
     for( auto& p : filesystem::directory_iterator( root ) )
     {
-        if ( p.is_directory() && p.path().string().find( "myDataSet" ) == string::npos)
+//        if ( p.is_directory() && p.path().string().find( "myDataSet" ) == string::npos)
+        if ( p.is_directory() )
             all_projects.push_back( p.path().string() );
     }
     
@@ -262,14 +262,14 @@ int main(int argc, char** argv) {
             string word;
             stringstream s( myLine );
             vector<string> row;
-            while ( getline( s, word, ',' ))
+            while ( getline( s, word, ',' ) )
                 row.push_back( word );
 //            cout<<"row:";
 //            for ( auto & R : row )
 //                cout<<R<<",";
 //            cout<<endl;
             
-            if( gate_to_heat.find(row[0]) != gate_to_heat.end() )
+            if( gate_to_heat.find( row[0] ) != gate_to_heat.end() )
             {
                 auto box_a = box_type{ point_type{ stod(row[1]), stod(row[2]) }, point_type{ stod(row[3]), stod(row[4]) } };            
                 rtree.insert( rtree_node_type{ box_a, row[0] } );

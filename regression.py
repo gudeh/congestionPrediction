@@ -47,7 +47,7 @@ labelName = 'routingHeat' #'label'
 secondLabel = 'placementHeat'
 #featName = 'feat'
 #labelName = 'label'
-numEpochs = 120
+numEpochs = 10
 
 
 def preProcessData( listDir ):
@@ -57,7 +57,8 @@ def preProcessData( listDir ):
 	labelToStandard = {}
 	labelsAux = pd.Series( name = labelName )
 	graphs  = {}
-	regexp = re.compile( r'(^.*)\_X(\d?\d)$' ) #_X1
+#	regexp = re.compile( r'(^.*)\_X(\d?\d)$' ) #_X1 works ok for nangate
+	regexp = re.compile( r'(^.*)\_?[x|xp](\d?\d)' ) 
 	for path in listDir:
 		print( "Circuit:",path )
 		gateToHeat = pd.read_csv( path / 'gatesToHeat.csv', index_col = 'id', dtype = { 'type':'category' } )
@@ -271,16 +272,16 @@ class SAGE( nn.Module ):
 		return h
 
 
-def drawGraph(graph, graphName):
+def drawGraph( graph, graphName ):
 #    print("graph:",type(graph))
 #    print('We have %d nodes.' % graph.number_of_nodes())
 #    print('We have %d edges.' % graph.number_of_edges())
     nx_G = graph.to_networkx()
-    pos = nx.kamada_kawai_layout(nx_G)
-    plt.figure(figsize=[15,7])
-    nx.draw(nx_G, pos, with_labels=True, node_color=[[.7, .7, .7]])
+    pos = nx.kamada_kawai_layout( nx_G )
+    plt.figure( figsize=[15,7] )
+    nx.draw( nx_G, pos, with_labels = True, node_color = [ [ .7, .7, .7 ] ] )
     #	plt.show()
-    plt.savefig(graphName)
+    plt.savefig( graphName )
 
 #    print("len graph.ndata:",len(graph.ndata))
 #    print("type graph.ndata:",type(graph.ndata))
