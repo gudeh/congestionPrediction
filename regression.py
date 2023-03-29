@@ -39,92 +39,106 @@ import networkx as nx #drawing graphs
 #print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 #print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [ 'type' ] #, 'size' ]
+listFeats = [ 'type' , 'size' ]
 featName = 'feat'#listFeats[0]
-rawFeatName = 'type' 
-#labelName = 'placementHeat' #'label'
+rawFeatName = 'type' #TODO: change to listFeats[0]
+
 labelName = 'routingHeat' #'label'
 secondLabel = 'placementHeat'
-#featName = 'feat'
-#labelName = 'label'
-numEpochs = 10
+
+numEpochs = 150
+
+DEBUG = False
 
 
 def preProcessData( listDir ):
-	nameToCategory = {}
-	typeToNameCat = {}
-	typeToSize = {}
-	labelToStandard = {}
-	labelsAux = pd.Series( name = labelName )
-	graphs  = {}
-#	regexp = re.compile( r'(^.*)\_X(\d?\d)$' ) #_X1 works ok for nangate
-	regexp = re.compile( r'(^.*)\_?[x|xp](\d?\d)' ) 
-	for path in listDir:
-		print( "Circuit:",path )
-		gateToHeat = pd.read_csv( path / 'gatesToHeat.csv', index_col = 'id', dtype = { 'type':'category' } )
-		#Other category encoder possibilities: https://contrib.scikit-learn.org/category_encoders/
-		for cellType in gateToHeat[ rawFeatName ]:
-	#            if cellType not in nameToCategory:
-	#                nameToCategory[ cellType ] = len( nameToCategory )
-			
-			match = re.match( regexp, cellType )
-			#print( "len( match.groups( ) )", len( match.groups( ) ))
-			if match: 
-				if len( match.groups( ) ) == 2:
-					if match.group( 1 ) not in nameToCategory:
-						nameToCategory[ match.group( 1 ) ] =  len( nameToCategory ) + 1
-					#typeTo2Categories[ cellType ] = [ nameToCategory[ match.group( 0 ) ], match.group( 1 ) ]
-					if cellType not in typeToNameCat:
-						typeToNameCat[ cellType ] = nameToCategory[ match.group( 1 ) ]
-						typeToSize[ cellType ]    = int( match.group( 2 ) )
-			else:
-				print( "WARNING: Unexpected cell type:", cellType )    
-				typeToNameCat[ cellType ] = - 1
-				typeToSize[ cellType ]    = - 1
-		labelsAux = pd.concat( [ labelsAux, gateToHeat[ labelName ] ], names = [ labelName ] )
-		graphs[ path ] = gateToHeat#.append( gateToHeat )
-	
-#######################################################################
-#	#FOR GLOBAL NORMALIZATION ON HEAT VALUES	
-#	#df = labelsAux
-#	print( "df before remove -1:\n", type(df), "\n", df,"\n")
-#	#    df = df.drop( df[ df < 0 ] )
-#	df = df.loc[ df >= 0 ]
-#	print( "df after remove -1:\n", df,"\n")
-#	dfMin = float( df.min() )
-#	dfMax = float( df.max() )
-#	for key in df:
-#		#print( "label:",label,"key:",key )
-#		if key not in labelToStandard: # and key >= 0:
-#		    labelToStandard[ key ] = ( key - dfMin ) / ( dfMax - dfMin )# 0 to 1
-#	#                labelToStandard[ key ] = ( key - series.mean() ) / series.std() # z value
-#	print( "\n\n\labelToStandard:\n", labelToStandard, "size:", len( labelToStandard  ) )
-#######################################################################
-		
-	print( "\n\n\nnameToCategory:\n", nameToCategory, "size:", len( nameToCategory  ) )
-	print( "\n\n\typeToNameCat:\n", typeToNameCat, "size:", len( typeToNameCat  ) )
-	print( "\n\n\typeToSize:\n", typeToSize, "size:", len( typeToSize  ) )
+    nameToCategory = {}
+    typeToNameCat = {}
+    typeToSize = {}
+    labelToStandard = {}
+    labelsAux = pd.Series( name = labelName )
+    graphs  = {}
+    #	regexp = re.compile( r'(^.*)\_X(\d?\d)$' ) #_X1 works ok for nangate
+    regexp = re.compile( r'(^.*)\_?[x|xp](\d?\d)', re.IGNORECASE ) 
+    for path in listDir:
+	    print( "Circuit:",path )
+	    gateToHeat = pd.read_csv( path / 'gatesToHeat.csv', index_col = 'id', dtype = { 'type':'category' } )
+	    #Other category encoder possibilities: https://contrib.scikit-learn.org/category_encoders/
+	    for cellType in gateToHeat[ rawFeatName ]:
+    #            if cellType not in nameToCategory:
+    #                nameToCategory[ cellType ] = len( nameToCategory )
+		    
+		    if "FILLCELL" not in cellType and "TAPCELL" not in cellType:
+		        match = re.match( regexp, cellType )
+		        #print( "len( match.groups( ) )", len( match.groups( ) ))
+		        if match: 
+			        if len( match.groups( ) ) == 2:
+				        if match.group( 1 ) not in nameToCategory:
+					        nameToCategory[ match.group( 1 ) ] =  len( nameToCategory ) + 1
+				        #typeTo2Categories[ cellType ] = [ nameToCategory[ match.group( 0 ) ], match.group( 1 ) ]
+				        if cellType not in typeToNameCat:
+					        typeToNameCat[ cellType ] = nameToCategory[ match.group( 1 ) ]
+					        typeToSize[ cellType ]    = int( match.group( 2 ) )
+		        else:
+			        print( "WARNING: Unexpected cell type:", cellType )    
+			        typeToNameCat[ cellType ] = -1
+			        typeToSize[ cellType ]    = -1
+		    else:
+			    typeToNameCat[ cellType ] = -1
+			    typeToSize[ cellType ]    = -1
+	    labelsAux = pd.concat( [ labelsAux, gateToHeat[ labelName ] ], names = [ labelName ] )
+	    graphs[ path ] = gateToHeat#.append( gateToHeat )
 
-	for key, g in graphs.items():
-		df = g[ labelName ]
-		df = df.loc[ df >= 0 ]
-		dfMin = float( df.min() )
-		dfMax = float( df.max() )
-		labelToStandard.clear()
-		for k in df:
-			#print( "label:",label,"k:",k )
-			if k not in labelToStandard: # and k >= 0:
-			    labelToStandard[ k ] = ( k - dfMin ) / ( dfMax - dfMin )# 0 to 1
-			#                labelToStandard[ k ] = ( k - series.mean() ) / series.std() # z value
+    ##################### FOR GLOBAL NORMALIZATION ON HEAT VALUES ###########################
+    df = labelsAux
+    print( "df before remove -1:\n", type(df), "\n", df,"\n")
+    #    df = df.drop( df[ df < 0 ] )
+    df = df.loc[ df >= 0 ]
+    print( "df after remove -1:\n", df,"\n")
+    
+    dfMin = float( df.min() )
+    dfMax = float( df.max() )
+    mean  = df.mean()
+    std   = df.std()
+    median = df.median()
+    p75 = df.quantile( 0.75 )  
+    p25 = df.quantile( 0.25 )
+    
+    print( "dfMin:", dfMin, "dfMax:", dfMax )
+    print( "mean:", mean, "std:", std )
+    for key in df:
+        #print( "label:",label,"key:",key )
+        if key not in labelToStandard: # and key >= 0:
+            labelToStandard[ key ] = ( key - median ) / ( p75 - p25 ) # quantile
+            #labelToStandard[ key ] = ( key - dfMin ) / ( dfMax - dfMin ) # 0 to 1
+            #labelToStandard[ key ] = ( key - mean ) / std  # z value (mean)
+    print( "\n\n\labelToStandard:\n", labelToStandard, "size:", len( labelToStandard  ) )
+    #######################################################################
+	    
+    print( "\n\n\nnameToCategory:\n", nameToCategory, "size:", len( nameToCategory  ) )
+    print( "\n\n\ntypeToNameCat:\n", typeToNameCat, "size:", len( typeToNameCat  ) )
+    print( "\n\n\ntypeToSize:\n", typeToSize, "size:", len( typeToSize  ) )
 
-		g[ 'size' ]    = g[ rawFeatName  ].replace( typeToSize )
-		g[ rawFeatName ]  = g[ rawFeatName  ].replace( typeToNameCat )
-		g[ labelName ] = g[ labelName ].replace( labelToStandard )
-		
-		#print("\n->g:\n",g)
-	#        print( "\n\n###########\n###########\ng[ featName ]:\n", g[ featName ] )
-	#        print( "\ng[ labelName ]:\n", g[ labelName ] )
-		g.to_csv( key / 'preProcessedGatesToHeat.csv' )
+    for key, g in graphs.items():
+	    df = g[ labelName ]
+    #		df = df.loc[ df >= 0 ]
+    #		dfMin = float( df.min() )
+    #		dfMax = float( df.max() )
+    #		labelToStandard.clear()
+    #		for k in df:
+    #			#print( "label:",label,"k:",k )
+    #			if k not in labelToStandard: # and k >= 0:
+    #			    labelToStandard[ k ] = ( k - dfMin ) / ( dfMax - dfMin )# 0 to 1
+    #			#                labelToStandard[ k ] = ( k - series.mean() ) / series.std() # z value
+
+	    g[ 'size' ]    = g[ rawFeatName  ].replace( typeToSize )
+	    g[ rawFeatName ]  = g[ rawFeatName  ].replace( typeToNameCat )
+	    g[ labelName ] = g[ labelName ].replace( labelToStandard )
+	    
+	    #print("\n->g:\n",g)
+    #        print( "\n\n###########\n###########\ng[ featName ]:\n", g[ featName ] )
+    #        print( "\ng[ labelName ]:\n", g[ labelName ] )
+	    g.to_csv( key / 'preProcessedGatesToHeat.csv' )
         
         
      
@@ -154,107 +168,125 @@ def writeDFrameData( listDir, csvName, outName ):
 
 
 class DataSetFromYosys( DGLDataset ):  
-	def __init__( self, listDir, split, mode='train' ):    
-		if len( split ) != 3 or sum( split ) != 1.0:
-			print("!!!!ERROR: fatal, unexpected split sizes." )
-			return
-			
-		self.graphPaths = []
-		self.graphs = []
-		self.names = []
-		allNames = []
-		self.mode = mode
+    def __init__( self, listDir, split, mode='train' ):    
+        if len( split ) != 3 or sum( split ) != 1.0:
+	        print("!!!!ERROR: fatal, unexpected split sizes." )
+	        return
+	        
+        self.graphPaths = []
+        self.graphs = []
+        self.names = []
+        allNames = []
+        self.mode = mode
 
-		for idx in range( len( listDir ) ):
-			allNames.append( str( listDir[idx] ).rsplit( '/' )[-1] )
-			#print( allNames[idx],",", end="" )
-	#        train, validate, test = np.split(files, [int(len(files)*0.8), int(len(files)*0.9)])
-		firstSlice  = math.ceil( len( listDir )*split[0] ) 
-		secondSlice = math.ceil( len( listDir )*split[1] + firstSlice ) 
-		print( "\nlen(listDir)",len(listDir))
-		print( "firstSlice:", firstSlice, "\nsecondSlice", secondSlice )
-		if mode == 'train':
-			self.graphPaths = listDir [ : firstSlice ]
-			self.names      = allNames[ : firstSlice ]
-		elif mode == 'valid':
-			self.graphPaths = listDir [ firstSlice: secondSlice ]
-			self.names      = allNames[ firstSlice: secondSlice ]
-		elif mode == 'test':
-			self.graphPaths = listDir [ secondSlice : ]
-			self.names      = allNames[ secondSlice : ]
+        for idx in range( len( listDir ) ):
+	        allNames.append( str( listDir[idx] ).rsplit( '/' )[-1] )
+	        #print( allNames[idx],",", end="" )
+    #        train, validate, test = np.split(files, [int(len(files)*0.8), int(len(files)*0.9)])
+        firstSlice  = math.ceil( len( listDir )*split[0] ) - 1
+        secondSlice = math.ceil( len( listDir )*split[1] + firstSlice )
+        if( len( listDir ) == 1 ):
+	        firstSlice  = 0
+	        secondSlice = 0
+        if( len( listDir ) == 2 ):
+	        firstSlice  = 1
+	        secondSlice = 1
+        if( len( listDir ) > 2 and len( listDir ) < 10 ):
+	        firstSlice  = -2
+	        secondSlice = -1
+         
+        print( "\nlen(listDir)",len(listDir))
+        print( "firstSlice:", firstSlice, "\nsecondSlice", secondSlice )
+        if mode == 'train':
+	        self.graphPaths = listDir [ : firstSlice ]
+	        self.names      = allNames[ : firstSlice ]
+        elif mode == 'valid':
+	        self.graphPaths = listDir [ firstSlice: secondSlice ]
+	        self.names      = allNames[ firstSlice: secondSlice ]
+        elif mode == 'test':
+	        self.graphPaths = listDir [ secondSlice : ]
+	        self.names      = allNames[ secondSlice : ]
 
-		super().__init__( name='mydata_from_yosys_'+mode )
+        super().__init__( name='mydata_from_yosys_'+mode )
 
-	def process( self ):
-		for path in self.graphPaths:
-			graph = self._process_single( path )
-			self.graphs.append( graph )
+    def process( self ):
+        for path in self.graphPaths:
+	        graph = self._process_single( path )
+	        self.graphs.append( graph )
 
-	def _process_single( self, designPath ):
-		print( "\n\n\n########################################" )
-		print( "Circuit:", str( designPath ).rsplit( '/' )[-1] )
-		print( "#########################################\n\n\n" )
-		nodes_data = pd.read_csv( designPath / 'preProcessedGatesToHeat.csv' )
-		edges_data  = pd.read_csv( designPath / 'DGLedges.csv')
-		edges_src  = torch.from_numpy( edges_data['Src'].to_numpy() )
-		edges_dst  = torch.from_numpy( edges_data['Dst'].to_numpy() )
+    def _process_single( self, designPath ):
+        print( "\n\n########################################" )
+        print( "Circuit:", str( designPath ).rsplit( '/' )[-1] )
+        print( "#########################################\n" )
+        nodes_data = pd.read_csv( designPath / 'preProcessedGatesToHeat.csv', index_col = 'id' )
+        nodes_data = nodes_data.sort_index()
+        edges_data = pd.read_csv( designPath / 'DGLedges.csv')
+        edges_src  = torch.from_numpy( edges_data['Src'].to_numpy() )
+        edges_dst  = torch.from_numpy( edges_data['Dst'].to_numpy() )
 
+        df = nodes_data[ listFeats + [ labelName ] ]
+        #print("np.where( df[ rawFeatName ] > 0, True, False ):\n", np.where( df[ rawFeatName ] > 0, True, False ).shape, "\n", np.where( df[ rawFeatName ] > 0, True, False ) )
+        df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] >= 0, True, False ) )
+        df_wanted = np.invert( df_wanted )
+    #		print( "df_wanted:", df_wanted.shape, "\n", df_wanted )
+        removedNodesMask = torch.tensor( df_wanted )
+    #		print( "removedNodesMask:", removedNodesMask.shape )#, "\n", removedNodesMask )
+        print( "nodes_data:", nodes_data.shape ) #, "\n", nodes_data )
+        idsToRemove = torch.tensor( nodes_data.index )[ removedNodesMask ]
+        
+    #		torch.set_printoptions( profile="full" )
+        print( "idsToRemove:", idsToRemove.shape ) #"\n", torch.sort( idsToRemove ) )
+    #		torch.set_printoptions( profile="default" )
+        
+        self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
+    #		self.graph.ndata[ 'name' ] = ( torch.from_numpy ( nodes_data[ 'name' ].to_numpy() ) )#.float()        
+        self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ listFeats ].values )
+        self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )#.float()
+        #self.graph.ndata[ secondLabel ] = ( torch.from_numpy ( nodes_data[ secondLabel ].to_numpy() ) )#.float()        
+    #		self.graph.ndata['powerHeat'] = torch.from_numpy (nodes_data['powerHeat'].to_numpy()).float()
+    #        	self.graph.ndata['irDropHeat'] = torch.from_numpy (nodes_data['irDropHeat'].to_numpy()).float()
+    #		self.graph.ndata['conCount'] = torch.from_numpy(nodes_data['conCount'].to_numpy())        #TODO possible feature, needs fix in yosys
 
-		df = nodes_data[ listFeats + [ labelName ] ]
-		#print("np.where( df[ rawFeatName ] > 0, True, False ):\n", np.where( df[ rawFeatName ] > 0, True, False ).shape, "\n", np.where( df[ rawFeatName ] > 0, True, False ) )
-		df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] > 0, True, False ) )
-		df_wanted = np.invert( df_wanted )
-#		df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, False, True ), np.where( df[ labelName ] > 0, False, True ) )
-		removedNodesMask = torch.tensor( df_wanted )
-		print( "removedNodesMask:", removedNodesMask.shape, "\n", removedNodesMask )
-		print( "nodes_data:\n", nodes_data)
-		idsToRemove = torch.tensor( nodes_data[ "id" ] )[ removedNodesMask ]
-		
-		torch.set_printoptions( profile="full" )
-		print( "idsToRemove:", idsToRemove.shape, "\n", idsToRemove )
-		torch.set_printoptions( profile="default" )
-		
-		for feat in listFeats:
-			print( "nodes_data[",feat,"]:\n", nodes_data[ feat ] )			
-		self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] ) 
+        print( "---> BEFORE REMOVED NODES:")
+        print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
+    ##		print( "\tself.graph.ndata\n", self.graph.ndata )		
 
-		self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ listFeats ].values )
-		self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )#.float()
-		self.graph.ndata[ secondLabel ] = ( torch.from_numpy ( nodes_data[ secondLabel ].to_numpy() ) )#.float()        
-#		self.graph.ndata['powerHeat'] = torch.from_numpy (nodes_data['powerHeat'].to_numpy()).float()
-#        self.graph.ndata['irDropHeat'] = torch.from_numpy (nodes_data['irDropHeat'].to_numpy()).float()
-#		self.graph.ndata['conCount'] = torch.from_numpy(nodes_data['conCount'].to_numpy())        #TODO possible feature, needs fix in yosys
+        self.graph.remove_nodes( idsToRemove )
+        
+    ################################################################################################
+        isolated_nodes = ( ( self.graph.in_degrees() == 0 ) & ( self.graph.out_degrees() == 0 ) ).nonzero().squeeze(1)
+        print( "isolated_nodes:", isolated_nodes.shape ) #, "\n", isolated_nodes )
+        self.graph.remove_nodes( isolated_nodes )
+        #self.graph = dgl.add_self_loop( self.graph ) 
+    ################################################################################################
+        
+        print( "\n---> AFTER REMOVED NODES:" )
+        print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
+    #		print( "\tself.graph.ndata\n", self.graph.ndata )			
 
+        return self.graph
+           
+    def __getitem__( self, i ):
+        return self.graphs[i]
 
-##		print( "before mask self.graph.ndata[ ",featName," ]:", self.graph.ndata[ featName ].shape, "\n", self.graph.ndata[ featName ] )
-#		aux =  torch.tensor( nodes_data[ listFeats ].values )
-#		print( "before mask self.graph.ndata.. aux", aux.shape, "\n", aux )
-#		self.graph.ndata['removedNodesMask'] = removedNodesMask.repeat( 1, 2 )
-#		print( "MASK", self.graph.ndata['removedNodesMask'].shape, "\n", self.graph.ndata['removedNodesMask'] )
-#		self.graph.ndata[ featName ] =  masked_tensor( aux, torch.unsqueeze( removedNodesMask, -1 ) )
-#		print( "after mask self.graph.ndata[ ",featName," ]:", self.graph.ndata[ featName ].shape, "\n", self.graph.ndata[ featName ] )
+    def __len__( self ):
+        #return 1
+        return len( self.graphs )
+        
+    def printDataset( self ):
+        totalNodes = 0
+        totalEdges = 0
+        print( "\n\n###", self.mode, "size:", len( self.graphs ) )
+        for idx in range( len( self.graphs ) ):
+            print( "\t>>>", idx," - ", self.names[idx], "\t\tV:", self.graphs[idx].num_nodes(), "E:", self.graphs[idx].num_edges() ) #, "\n", self.graphs[idx] )
+            totalNodes += self.graphs[idx].num_nodes()
+            totalEdges += self.graphs[idx].num_edges()    
+        print( "Total Vertices:", totalNodes )
+        print( "Total Edges:   ", totalEdges )
+            #drawGraph( self.graphs[idx], self.names[idx] )
 
-		self.graph.remove_nodes( idsToRemove )
-
-		return self.graph
-		   
-	def __getitem__( self, i ):
-		return self.graphs[i]
-
-	def __len__( self ):
-		#return 1
-		return len( self.graphs )
-		
-	def printDataset( self ):
-		print( "\n\n", self.mode, "size:", len( self.graphs ) )
-		for idx in range( len( self.graphs ) ):
-		    print( "\t>>>", idx," - ", self.names[idx] ) #, "\n", self.graphs[idx] )
-		    #drawGraph( self.graphs[idx], self.names[idx] )
-
-#	def writeDataset( self ):
-	
-	def getNames( self ):
-		return self.names
+    def getNames( self ):
+	    return self.names
 
     
 
@@ -318,32 +350,30 @@ class GAT( nn.Module ):
 
  
 def evaluate( g, features, labels, model ):#, mask ):
-	model.eval()
-	with torch.no_grad():
-		#features = features[ mask ]
-		if( features.dim() == 1 ):
-			features = features.unsqueeze(1)
-		#labels = labels[ mask ]
-		print( "\t>>> features in evaluate:", type( features ), features.shape, "\n", features )
-		print( "\t>>> labels   in evaluate:", type( labels ),   labels.shape, "\n", labels )
-
-
-		output = model( g, features )
-		#r2 = r2_score( labels.data.cpu.numpy(), output ) 
-		print("\t>>>> output before squeeze:", type(output), output.shape, "\n", output )
-		output = output.squeeze(1)
-		#output = output[ mask ]
-		print("\t>>>> output after squeeze:", type(output), output.shape, "\n", output )
+    model.eval()
+    with torch.no_grad():
+        if( features.dim() == 1 ):
+            features = features.unsqueeze(1)
+        output = model( g, features ) 
+        #print("\t>>>> output before squeeze:", type(output), output.shape, "\n", output )
+        output = output.squeeze(1)
+#        torch.set_printoptions( profile="full" )
+#        print( "\t>>> features in evaluate:", features.shape, "\n", list ( features ) )
+#        print( "\t>>> labels   in evaluate:", labels.shape, "\n", labels )
+#        print("\t>>>> output after squeeze:", output.shape, "\n", output )
+#        torch.set_printoptions( profile="default" )
              
-		kendall = KendallRankCorrCoef()
-		#score = kendall( labels.data.cpu(), output.squeeze(1) )
-		score_kendall = kendall( labels, output )
-		print("score_kendall:", type( score_kendall ), str( score_kendall ), "\n", score_kendall,"\n\n")
-		return score_kendall
+        #r2 = r2_score( labels.data.cpu.numpy(), output )
+        #print( "r2:", r2 )
+        kendall = KendallRankCorrCoef( variant = 'a' )
+        #score = kendall( labels.data.cpu(), output.squeeze(1) )
+        score_kendall = kendall( output, labels )
+#        print("score_kendall:", type( score_kendall ), str( score_kendall ), "\n", score_kendall,"\n\n")
+        return score_kendall
 
-def evaluate_in_batches(dataloader, device, model):
+def evaluate_in_batches( dataloader, device, model ):
     total_score = 0
-    for batch_id, batched_graph in enumerate(dataloader):
+    for batch_id, batched_graph in enumerate( dataloader ):
 #        mask = batched_graph.ndata[ 'removedNodesMask' ]
         batched_graph = batched_graph.to( device )
         features = batched_graph.ndata[ featName ].float()
@@ -375,7 +405,7 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
         # mini-batch loop
         for batch_id, batched_graph in enumerate( train_dataloader ):
             batched_graph = batched_graph.to(device)
-#            print("->batched_graph",batched_graph)			
+#            print( "->batched_graph", type( batched_graph ), batched_graph )
 #            print("\t%%%% Batch ID ", batch_id )
             features = batched_graph.ndata[ featName ].float()
 #            removedNodesMask = batched_graph.ndata[ 'removedNodesMask' ]
@@ -394,168 +424,167 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
 #            print("->labels in train:",type(labels),labels.shape)
 #            print("\n",labels)
             loss = loss_fcn( logits, labels )
-#            loss = loss_fcn( logits[ removedNodesMask ], labels[ removedNodesMask ] )
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-            
-        avg_score = evaluate_in_batches( val_dataloader, device, model )
-        writer.add_scalar( "Loss Train", total_loss / (batch_id + 1), epoch )
-        writer.add_scalar( "Score Valid", avg_score, epoch )
-        print("Epoch {:05d} | Loss {:.4f} |". format(epoch, total_loss / (batch_id + 1) ))
+                        
+        if DEBUG:
+            writer.add_scalar( "Loss Train", total_loss / (batch_id + 1), epoch )
+            print("Epoch {:05d} | Loss {:.4f} |". format(epoch, total_loss / (batch_id + 1) ))
+            avg_score = evaluate_in_batches( val_dataloader, device, model )
+            writer.add_scalar( "Score Valid", avg_score, epoch )
+            if ( epoch + 1 ) % 5 == 0:
+                #avg_score = evaluate_in_batches( val_dataloader, device, model) # evaluate r2-score instead of loss
+                print("                            Acc. (score) {:.4f} ". format(avg_score))
         
-        if ( epoch + 1 ) % 5 == 0:
-            #avg_score = evaluate_in_batches( val_dataloader, device, model) # evaluate r2-score instead of loss
-            print("                            Acc. (score) {:.4f} ". format(avg_score))
     writer.flush()
     writer.close()
 
 
 if __name__ == '__main__':
-	print(f'Training Yosys Dataset with DGL built-in GATConv module.')
-	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-	#device = torch.device('cpu')
+    print(f'Training Yosys Dataset with DGL built-in GATConv module.')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    #device = torch.device('cpu')
 
-	#    train_dataset = PPIDataset(mode='train')
-	#    val_dataset = PPIDataset(mode='valid')
-	#    test_dataset = PPIDataset(mode='test')
-	listDir = []	
-	for designPath in Path( Path.cwd() / 'dataSet' ).iterdir():
-		if designPath.is_dir() and "runs" not in str( designPath ):
-			print("designPath:", designPath )
-			listDir.append( designPath )
-	################################################################################
-	################################################################################
-	#if( featName != 'feat' ):
-	writeDFrameData( listDir, 'gatesToHeat.csv', "DSinfoBeforePreProcess.csv" )
-	df = aggregateData( listDir, 'gatesToHeat.csv' )
-	#df = df.drop( df.index[ df[ labelName ] < 0 ] )
-	print( "\n\n#######################\n## BEFORE PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
-	for col in df:
-		print( "describe:\n", df[ col ].describe() )
-	df.to_csv( "aggregatedDFBefore.csv" )
-	df.hist( bins = 50, figsize = (15,12) )
-	plt.savefig( "BeforePreProcess-train+valid+test" )
+    listDir = []	
+    for designPath in Path( Path.cwd() / 'dataSet' ).iterdir():
+	    if designPath.is_dir() and "runs" not in str( designPath ):
+		    print("designPath:", designPath )
+		    listDir.append( designPath )
+
+    ##################################################################################
+    ############################# Pre Processing #####################################
+    ##################################################################################
+    #if( featName != 'feat' ):
+    writeDFrameData( listDir, 'gatesToHeat.csv', "DSinfoBeforePreProcess.csv" )
+    df = aggregateData( listDir, 'gatesToHeat.csv' )
+    print( "\n\n#######################\n## BEFORE PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
+    for col in df:
+	    print( "describe:\n", df[ col ].describe() )
+    df.to_csv( "aggregatedDFBefore.csv" )
+    df.hist( bins = 50, figsize = (15,12) )
+    plt.savefig( "BeforePreProcess-train+valid+test" )
 
 
-	#if( featName != 'feat' ):
-	preProcessData( listDir )
-		        
+    preProcessData( listDir )
+	            
+    #	df = df.drop( df.index[ df[ rawFeatName ] < 0 ] )
+    #	df = df.drop( df.index[ df[ labelName ] < 0 ] )
+    writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
+    df = aggregateData( listDir, 'preProcessedGatesToHeat.csv' )
+#    df = df.drop( df.index[ df[ labelName ] < 0 ])
+    print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
+    for col in df:
+	    print( "describe:\n", df[ col ].describe() )
+    df.to_csv( "aggregatedDFAfter.csv" )
+    df.hist( bins = 50, figsize = (15,12) )
+    plt.savefig( "AfterPreProcess-train+valid+test" )
 
-	writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
-	#if( featName != 'feat' ):
-	df = aggregateData( listDir, 'preProcessedGatesToHeat.csv' )
-	df = df.drop( df.index[ df[ labelName ] < 0 ])
-	print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
-	for col in df:
-		print( "describe:\n", df[ col ].describe() )
-	df.to_csv( "aggregatedDFAfter.csv" )
-	df.hist( bins = 50, figsize = (15,12) )
-	plt.savefig( "AfterPreProcess-train+valid+test" )
+    #df.plot( kind = "scatter",  x = "placementHeat", y = "type" )
+    #    df.plot.area( figsize = (15,12), subplots = True )
+    #    plt.savefig( "scatterPlacement" )
+    ################################################################################
+    ################################################################################    
 
-	#df.plot( kind = "scatter",  x = "placementHeat", y = "type" )
-	#    df.plot.area( figsize = (15,12), subplots = True )
-	#    plt.savefig( "scatterPlacement" )
-	################################################################################
-	################################################################################    
-	
-	summary = "runSummary.csv"
-	with open( summary, 'w' ) as f:
-		f.write( "#Circuits:" + str( len( listDir ) ) )
-		f.write( ",labelName:" + labelName )
-		f.write( ",features:" ) 
-		f.write( ";".join( listFeats ) )
-		f.write( "\nCircuit Valid, Circuit Test, Train, Valid, Test\n" )
-		
-	split = [ 0.8, 0.1, 0.1 ]
-	#shuffle( listDir )
-	for i in range( 0, len( listDir ) - 1 ):
-		for j in range( 0, len( listDir ) - 1 ):
-			if i == j:
-				continue
-			currentDir = listDir.copy()
-			
-			auxString = listDir[ -1 ]
-			currentDir[ -1 ] = listDir[ i ]
-			currentDir[ i ] = auxString
+    summary = "runSummary.csv"
+    with open( summary, 'w' ) as f:
+	    f.write( "#Circuits:" + str( len( listDir ) ) )
+	    f.write( ",epochs:" + str( numEpochs ) )
+	    f.write( ",labelName:" + labelName )
+	    f.write( ",features:" ) 
+	    f.write( ";".join( listFeats ) )
+	    f.write( "\nCircuit Valid, Circuit Test, Train, Valid, Test\n" )
+	    
+    split = [ 0.9, 0.05, 0.05 ]
+    #shuffle( listDir )
+    for i in range( 0, len( listDir ) - 1 ):
+        for j in range( 0, len( listDir ) - 1 ):
+            if i == j:
+                continue
+            print( "##################################################################################" )
+            print( "############################# New Run ############################################" )
+            print( "##################################################################################" )
+            currentDir = listDir.copy()
 
-			auxString = listDir[ -2 ]
-			currentDir[ -2 ] = listDir[ j ]
-			currentDir[ j ] = auxString
-			
-	#			train_dataset = DataSetFromYosys( listDir, split, mode='train' )
-	#			val_dataset   = DataSetFromYosys( listDir, split, mode='valid' )
-	#			test_dataset  = DataSetFromYosys( listDir, split, mode='test'  )
-			
-			train_dataset = DataSetFromYosys( currentDir, split, mode='train' )
-			val_dataset   = DataSetFromYosys( currentDir, split, mode='valid' )
-			test_dataset  = DataSetFromYosys( currentDir, split, mode='test'  )
+            auxString = currentDir[ -1 ]
+            currentDir[ -1 ] = currentDir[ i ]
+            currentDir[ i ] = auxString
 
-			features = train_dataset[0].ndata[ featName ]      
-			if( features.dim() == 1 ):
-				features = features.unsqueeze(1)
+            auxString = currentDir[ -2 ]
+            currentDir[ -2 ] = currentDir[ j ]
+            currentDir[ j ] = auxString
 
-			#features = torch.cat( [train_dataset[0].ndata[ featName ][:,None]], dim=1 ) #TODO sometimes shape is unidimension
-			in_size = features.shape[1]
-			print("features.shape",features.shape)
+            train_dataset = DataSetFromYosys( currentDir, split, mode='train' )
+            val_dataset   = DataSetFromYosys( currentDir, split, mode='valid' )
+            test_dataset  = DataSetFromYosys( currentDir, split, mode='test'  )
 
-			#	node_labels = train_dataset[0].ndata[ labelName ].float()
-			#	node_labels[ node_labels == -1 ] = 0
-			#	out_size = int(node_labels.max().item() + 1)
-			#    out_size = train_dataset.num_labels
-			out_size = 1 #TODO parametrize this
+            features = train_dataset[0].ndata[ featName ]      
+            if( features.dim() == 1 ):
+                features = features.unsqueeze(1)
 
-			print("in_size",in_size,",  out_size",out_size)
-			model = GAT( in_size, 256, out_size, heads=[4,4,6]).to(device)
-			#model = SAGE( in_feats = in_size, hid_feats=100, out_feats = out_size )
+            #features = torch.cat( [train_dataset[0].ndata[ featName ][:,None]], dim=1 ) #TODO sometimes shape is unidimension
+            in_size = features.shape[1]
+            print("features.shape",features.shape)
 
-			print( "\n###################"   )
-			print( "\n## MODEL DEFINED ##"   )
-			print( "\n###################\n" )
+            #	node_labels = train_dataset[0].ndata[ labelName ].float()
+            #	node_labels[ node_labels == -1 ] = 0
+            #	out_size = int(node_labels.max().item() + 1)
+            #    out_size = train_dataset.num_labels
+            out_size = 1 #TODO parametrize this
 
-			train_dataloader = GraphDataLoader( train_dataset, batch_size=2 )
-			val_dataloader   = GraphDataLoader( val_dataset,   batch_size=1 )
-			test_dataloader  = GraphDataLoader( test_dataset,  batch_size=1 )
+            print("in_size",in_size,",  out_size",out_size)
+            model = GAT( in_size, 256, out_size, heads=[4,4,6]).to(device)
+            #model = SAGE( in_feats = in_size, hid_feats=100, out_feats = out_size )
 
-			for batch_id, batched_graph in enumerate( train_dataloader ):
-				batched_graph = batched_graph.to( device )
-				#print("batch_id",batch_id)#"->batched_graph",type(batched_graph),"\n",batched_graph)
+            print( "\n###################"   )
+            print( "## MODEL DEFINED ##"   )
+            print( "###################\n" )
 
+            train_dataloader = GraphDataLoader( train_dataset, batch_size=2 )
+            val_dataloader   = GraphDataLoader( val_dataset,   batch_size=1 )
+            test_dataloader  = GraphDataLoader( test_dataset,  batch_size=1 )
 
-			print( "\n###################"   )
-			print( "\n### SPLIT INFO ####"   )
-			print( "\n###################\n" )
-			train_dataset.printDataset()    
-			val_dataset.printDataset()    
-			test_dataset.printDataset()  
-			print( "Processing currentDir:" )
-			for item in  currentDir:
-				print(item)
-			print( "i:", i, "j:", j )
-			print( "split lengths:", len(train_dataset), len(val_dataset), len(test_dataset) )
+            for batch_id, batched_graph in enumerate( train_dataloader ):
+                batched_graph = batched_graph.to( device )
+                #print("batch_id",batch_id)#"->batched_graph",type(batched_graph),"\n",batched_graph)
 
-			writerName = "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) ) + "-V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
-			train( train_dataloader, val_dataloader, device, model, writerName )
+            print( "\n###################"   )
+            print( "### SPLIT INFO ####"   )
+            print( "###################"   )
+            train_dataset.printDataset()    
+            val_dataset.printDataset()    
+            test_dataset.printDataset()  
+            print( "->original:   ", end="" )
+            for item in listDir:
+                print( str( item ).rsplit( '/' )[-1], end=", " )
+            print( "\n" )
+            print( "->currentDir: ", end="" )
+            for item in currentDir:
+                print( str( item ).rsplit( '/' )[-1], end=", " )
+            print( "\n" )
+            print( "i:", i, "j:", j )
+            print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
 
-			# test the model
-			print('Testing...')    
-			test_score = evaluate_in_batches( test_dataloader, device, model )
-			valid_score = evaluate_in_batches( val_dataloader, device, model )
-			train_score = evaluate_in_batches( train_dataloader, device, model )
-			#	print("Test Accuracy (F1-score) {:.4f}".format(avg_score))
-			print( "Train Accuracy {:.4f}".format( train_score ) )
-			print( "Valid Accuracy {:.4f}".format( valid_score ) )
-			print( "Test Accuracy {:.4f}".format( test_score ) )
+            writerName = "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) ) + "-V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
+            train( train_dataloader, val_dataloader, device, model, writerName )
 
-			with open( summary, 'a' ) as f:
-				f.write( val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_score.item() ) +","+ str( valid_score.item() ) +","+ str( test_score.item() )  +"\n")
-				 			
-			del model
-			del train_dataset
-			del val_dataset
-			del test_dataset
-			del train_dataloader
-			del val_dataloader
-			del test_dataloader
+            print( '######################\n## Final Evaluation ##\n######################\n' )    
+            test_score = evaluate_in_batches( test_dataloader, device, model )
+            valid_score = evaluate_in_batches( val_dataloader, device, model )
+            train_score = evaluate_in_batches( train_dataloader, device, model )
+            print( "Train Accuracy {:.4f}".format( train_score ) )
+            print( "Valid Accuracy {:.4f}".format( valid_score ) )
+            print( "Test Accuracy {:.4f}".format( test_score ) )
+
+            with open( summary, 'a' ) as f:
+                f.write( val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_score.item() ) +","+ str( valid_score.item() ) +","+ str( test_score.item() )  +"\n")
+                 			
+            del model
+            del train_dataset
+            del val_dataset
+            del test_dataset
+            del train_dataloader
+            del val_dataloader
+            del test_dataloader
 
