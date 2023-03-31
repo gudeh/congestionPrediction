@@ -172,9 +172,9 @@ struct heatBbox{
 //Using netbeans to compile on proper folder. Original: ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/gatetoheat
 int main(int argc, char** argv) {
 
-    string root="./congestionPrediction/dataSet";
-    vector<string> all_projects;
-    vector<string> projectWithErrors;
+    string root = "./congestionPrediction/dataSet";
+    vector< string > all_projects;
+    vector< string > projectWithErrors;
     for( auto& p : filesystem::directory_iterator( root ) )
     {
 //        if ( p.is_directory() && p.path().string().find( "myDataSet" ) == string::npos)
@@ -188,23 +188,23 @@ int main(int argc, char** argv) {
         string cellsPath = "";//, edgesPath;
         for ( auto &path : filesystem::directory_iterator( project ) )
         {
-            if ( path.path().extension() == ".csv" && path.path().string().find("DGLcells") != string::npos )
+            if ( path.path().extension() == ".csv" && path.path().string().find( "DGLcells" ) != string::npos )
                 cellsPath = path.path().string();
         }
         
         vector<string> heat_csvs, position_files; 
         for ( auto &path : filesystem::directory_iterator( project ) )
         {
-            if ( path.path().extension() == ".csv" && path.path().string().find("routingHeat") != string::npos )
+            if ( path.path().extension() == ".csv" && path.path().string().find( "routingHeat" ) != string::npos )
                 heat_csvs.push_back( path.path().string() );
-            if ( path.path().extension() == ".csv" && path.path().string().find("placementHeat") != string::npos )
+            if ( path.path().extension() == ".csv" && path.path().string().find( "placementHeat" ) != string::npos )
                 heat_csvs.push_back( path.path().string() );
-            if ( path.path().extension() == ".csv" && path.path().string().find("powerHeat") != string::npos )
+            if ( path.path().extension() == ".csv" && path.path().string().find( "powerHeat" ) != string::npos )
                 heat_csvs.push_back( path.path().string() );
-            if ( path.path().extension() == ".csv" && path.path().string().find("irdropHeat") != string::npos )
+            if ( path.path().extension() == ".csv" && path.path().string().find( "irdropHeat" ) != string::npos )
                 heat_csvs.push_back( path.path().string() );                
             
-            if (path.path().extension() == ".csv" && path.path().string().find("gatesPosition") != string::npos)
+            if (path.path().extension() == ".csv" && path.path().string().find( "gatesPosition" ) != string::npos)
             {
                 cout << "gates file:" << path.path().stem().string() << endl;
                 position_files.push_back( path.path().string() );
@@ -242,27 +242,38 @@ int main(int argc, char** argv) {
         {
             string word;
             stringstream s( myLine );
-            vector<string> row;
+            vector< string > row;
             while ( getline( s, word, ',' ))
                 row.push_back( word );
             gate myGate;
             myGate.id = stod( row[0] );
-            //ignore name and hashid: [1] and [2]
-            myGate.type = row[3];
-            myGate.conCount = stod( row[4] );
-            gate_to_heat.insert( pair< string, gate > ( row[1], myGate ) );
+            //ignore hashid: [2]
+            myGate.type      = row[3];
+            myGate.conCount  = stod( row[4] );
+            string yosysName = row[1];
+            //Corner case where verilog names are different than the ones in OR
+            if( yosysName[0] == '\\' )
+                yosysName.erase( yosysName.begin() );
+            if( yosysName.size() > 0 )
+            {
+                if( yosysName[ yosysName.size() - 1 ] == ' ' )
+                    yosysName.erase( yosysName.begin() +yosysName.size() - 1 );
+            }
+            gate_to_heat.insert( pair< string, gate > ( yosysName, myGate ) );
         } 
         
+        int numGatesOR = 0, numMiss = 0;
+        vector< string > buffer;        
         rtree_type rtree;
         cout<<"position_files[0]: "<<position_files[0]<<endl;
         fstream filePositions( position_files[0], ios::in );
-        getline( filePositions, myLine );
+        getline( filePositions, myLine ); // jump first line
         while  ( getline( filePositions, myLine ) )
         {
             string word;
             stringstream s( myLine );
             vector<string> row;
-            while ( getline( s, word, ',' ) )
+            while  ( getline( s, word, ',' ) )
                 row.push_back( word );
 //            cout<<"row:";
 //            for ( auto & R : row )
@@ -274,14 +285,32 @@ int main(int argc, char** argv) {
                 auto box_a = box_type{ point_type{ stod(row[1]), stod(row[2]) }, point_type{ stod(row[3]), stod(row[4]) } };            
                 rtree.insert( rtree_node_type{ box_a, row[0] } );
             }
-//          TODO: what  todo when gates added by openroad/yosys? ignoring for now.            
-//            else
-//                cout<< "Gate added by OpenRoad: " << row[0] << ",pos:" << row[1] << "," << row[2] << "|" << row[3] << "," << row[4] << endl;
-                
-//            gate_to_heat.insert( pair< std::string, std::array< double, 4 > > ( row[0], std::array< double, 4 > { -1.0, -1.0, -1.0, -1.0 } ) );
+            else
+            {
+                if( row[0].find( "TAP" ) == string::npos && row[0].find( "FILL" ) == string::npos && row[0].find( "PHY" ) == string::npos )
+                {
+                    //cout<< "Gate added by OpenRoad: " << row[0] << ",pos:" << row[1] << "," << row[2] << "|" << row[3] << "," << row[4] << endl;
+                    //noMatch << row[0] << "," << row[1] << "," << row[2] << "," << row[3] << "," << row[4] << endl;   
+                    buffer.push_back( row[0] + "," + row[1] + "," + row[2] + "," + row[3] + "," + row[4] + "\n" );  
+                }
+                numMiss++; 
+            }
+            numGatesOR++;
+        }
+        fstream noMatch( project + "/missingNamesInOR.txt", ios::out );
+        noMatch << project << ", totalOR:" << numGatesOR << ", matches:" << rtree.size() << ", missing:" << buffer.size() << ", \%match:" << ( (float) rtree.size() ) / numGatesOR << endl;
+        cout << project << ", totalOR:" << numGatesOR << ", matches:" << rtree.size() << ", missing:" << buffer.size() << ", \%match:" << ( (float) rtree.size() ) / numGatesOR << endl;
+        if( numMiss > 0 )
+        {
+            cout << "\n\nERROR!!! Name missmatch size: " << numMiss << endl << endl;
+            noMatch << "name,xMin,yMin,xMax,yMax" << endl;
+            projectWithErrors.push_back( project );
+            for( auto line : buffer )
+                noMatch << line;
+            noMatch << endl << endl << endl;
         }
         
-
+                        
         for ( auto& heatFileName : heat_csvs )
         {
             string myLine, word;
