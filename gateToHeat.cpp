@@ -264,7 +264,7 @@ int main(int argc, char** argv) {
         
         int numGatesOR = 0, numMiss = 0;
         vector< string > buffer;        
-        rtree_type rtree;
+        rtree_type rtreeGates;
         cout<<"position_files[0]: "<<position_files[0]<<endl;
         fstream filePositions( position_files[0], ios::in );
         getline( filePositions, myLine ); // jump first line
@@ -283,7 +283,7 @@ int main(int argc, char** argv) {
             if( gate_to_heat.find( row[0] ) != gate_to_heat.end() )
             {
                 auto box_a = box_type{ point_type{ stod(row[1]), stod(row[2]) }, point_type{ stod(row[3]), stod(row[4]) } };            
-                rtree.insert( rtree_node_type{ box_a, row[0] } );
+                rtreeGates.insert( rtree_node_type{ box_a, row[0] } );
             }
             else
             {
@@ -298,8 +298,8 @@ int main(int argc, char** argv) {
             numGatesOR++;
         }
         fstream noMatch( project + "/missingNamesInOR.txt", ios::out );
-        noMatch << project << ", totalOR:" << numGatesOR << ", matches:" << rtree.size() << ", missing:" << buffer.size() << ", \%match:" << ( (float) rtree.size() ) / numGatesOR << endl;
-        cout << project << ", totalOR:" << numGatesOR << ", matches:" << rtree.size() << ", missing:" << buffer.size() << ", \%match:" << ( (float) rtree.size() ) / numGatesOR << endl;
+        noMatch << project << ", totalOR:" << numGatesOR << ", matches:" << rtreeGates.size() << ", missing:" << buffer.size() << ", \%match:" << ( (float) rtreeGates.size() ) / numGatesOR << endl;
+        cout << project << ", totalOR:" << numGatesOR << ", matches:" << rtreeGates.size() << ", missing:" << buffer.size() << ", \%match:" << ( (float) rtreeGates.size() ) / numGatesOR << endl;
         if( numMiss > 0 )
         {
             cout << "\n\nERROR!!! Name missmatch size: " << numMiss << endl << endl;
@@ -316,6 +316,7 @@ int main(int argc, char** argv) {
             string myLine, word;
             fstream fHeat( heatFileName, ios::in );
             getline( fHeat, myLine );
+            int intersectCount = 0;
             while( getline( fHeat, myLine ) )
             {
                 stringstream s( myLine );
@@ -327,23 +328,37 @@ int main(int argc, char** argv) {
 //                    cout<<R<<",";
 //                cout<<endl;
                 
-                auto box_search = box_type{ point_type{ stod(row[0]), stod(row[1])}, point_type{ stod(row[2]), stod(row[3]) } };
-                std::vector<rtree_node_type> int_area_nodes;
-                rtree.query( boost::geometry::index::intersects( box_search ), std::back_inserter( int_area_nodes ));
+                auto heatBox = box_type{ point_type{ stod( row[0] ), stod( row[1] ) }, point_type{ stod( row[2] ), stod( row[3] ) } };
+                std::vector< rtree_node_type > int_area_nodes;
+                rtreeGates.query( boost::geometry::index::intersects( heatBox ), std::back_inserter( int_area_nodes ));
+                auto heatValue = stod( row[4] );
                 for ( auto& intersect : int_area_nodes )
                 {
-//                    gate_to_heat.insert( std::pair< std::string, double >( intersect.second, stod( row[4] ) ) );
-                    if ( heatFileName.find("routingHeat") != string::npos )
-//                        gate_to_heat[ intersect.second ].at(0) = stod( row[4] );
-                        gate_to_heat[ intersect.second ].heatRouting = stod( row[4] );
-                    if ( heatFileName.find("placementHeat") != string::npos )
-                        gate_to_heat[ intersect.second ].heatPlacement = stod( row[4] );
-                    if ( heatFileName.find("powerHeat") != string::npos )
-                        gate_to_heat[ intersect.second ].heatPower = stod( row[4] );
-                    if ( heatFileName.find("irdropHeat") != string::npos )
-                        gate_to_heat[ intersect.second ].heatIRDrop = stod( row[4] );
+                    if ( heatFileName.find( "routingHeat" ) != string::npos )
+                    {
+                        if( heatValue > gate_to_heat[ intersect.second ].heatRouting )
+                            gate_to_heat[ intersect.second ].heatRouting = heatValue;
+                    }
+                    if ( heatFileName.find( "placementHeat" ) != string::npos )
+                    {
+                        if( heatValue > gate_to_heat[ intersect.second ].heatPlacement )
+                            gate_to_heat[ intersect.second ].heatPlacement = heatValue;
+                    }
+                    if ( heatFileName.find( "powerHeat" ) != string::npos )
+                    {
+                        if( heatValue > gate_to_heat[ intersect.second ].heatPower )
+                            gate_to_heat[ intersect.second ].heatPower = heatValue;
+                    }
+                    if ( heatFileName.find( "irdropHeat" ) != string::npos )
+                    {
+                        if( heatValue > gate_to_heat[ intersect.second ].heatIRDrop )
+                            gate_to_heat[ intersect.second ].heatIRDrop = heatValue;
+                    }
                 }
+                intersectCount += int_area_nodes.size();
             }
+            noMatch << heatFileName << "intersects: " <<  intersectCount << endl << endl;
+            cout << heatFileName << "intersects: " << intersectCount << endl;
         }
 //        std::cout << "heatFileName:" << heatFileName <<endl;
 //        std::string outName = heatFileName.erase( 0, heatFileName.find_last_of("/") );
