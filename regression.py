@@ -43,12 +43,16 @@ listFeats = [ 'type' , 'size' ]
 featName = 'feat'#listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
-labelName = 'routingHeat' #'label'
+labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
 numEpochs = 150
 
-DEBUG = False
+DEBUG     = True
+CUDA      = True
+SELF_LOOP = True
+COLAB     = False
+
 
 
 def preProcessData( listDir ):
@@ -63,6 +67,8 @@ def preProcessData( listDir ):
     for path in listDir:
 	    print( "Circuit:",path )
 	    gateToHeat = pd.read_csv( path / 'gatesToHeat.csv', index_col = 'id', dtype = { 'type':'category' } )
+	    labelsAux = pd.concat( [ labelsAux, gateToHeat[ labelName ] ], names = [ labelName ] )
+	    graphs[ path ] = gateToHeat#.append( gateToHeat )
 	    #Other category encoder possibilities: https://contrib.scikit-learn.org/category_encoders/
 	    for cellType in gateToHeat[ rawFeatName ]:
     #            if cellType not in nameToCategory:
@@ -86,14 +92,14 @@ def preProcessData( listDir ):
 		    else:
 			    typeToNameCat[ cellType ] = -1
 			    typeToSize[ cellType ]    = -1
-	    labelsAux = pd.concat( [ labelsAux, gateToHeat[ labelName ] ], names = [ labelName ] )
-	    graphs[ path ] = gateToHeat#.append( gateToHeat )
+
 
     ##################### FOR GLOBAL NORMALIZATION ON HEAT VALUES ###########################
     df = labelsAux
     print( "df before remove -1:\n", type(df), "\n", df,"\n")
     #    df = df.drop( df[ df < 0 ] )
-    df = df.loc[ df >= 0 ]
+#    df = df.loc[ df >= 0 ]
+    df = df.loc[ df > 0 ] # trying to remove also 0 heat
     print( "df after remove -1:\n", df,"\n")
     
     dfMin = float( df.min() )
@@ -109,8 +115,8 @@ def preProcessData( listDir ):
     for key in df:
         #print( "label:",label,"key:",key )
         if key not in labelToStandard: # and key >= 0:
-            labelToStandard[ key ] = ( key - median ) / ( p75 - p25 ) # quantile
-            #labelToStandard[ key ] = ( key - dfMin ) / ( dfMax - dfMin ) # 0 to 1
+            #labelToStandard[ key ] = ( key - median ) / ( p75 - p25 ) # quantile
+            labelToStandard[ key ] = ( key - dfMin ) / ( dfMax - dfMin ) # 0 to 1
             #labelToStandard[ key ] = ( key - mean ) / std  # z value (mean)
     print( "\n\n\labelToStandard:\n", labelToStandard, "size:", len( labelToStandard  ) )
     #######################################################################
@@ -120,7 +126,7 @@ def preProcessData( listDir ):
     print( "\n\n\ntypeToSize:\n", typeToSize, "size:", len( typeToSize  ) )
 
     for key, g in graphs.items():
-	    df = g[ labelName ]
+	#    df = g[ labelName ]
     #		df = df.loc[ df >= 0 ]
     #		dfMin = float( df.min() )
     #		dfMax = float( df.max() )
@@ -226,26 +232,22 @@ class DataSetFromYosys( DGLDataset ):
 
         df = nodes_data[ listFeats + [ labelName ] ]
         #print("np.where( df[ rawFeatName ] > 0, True, False ):\n", np.where( df[ rawFeatName ] > 0, True, False ).shape, "\n", np.where( df[ rawFeatName ] > 0, True, False ) )
-        df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] >= 0, True, False ) )
+        
+
+#        df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] >= 0, True, False ) )
+        df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] > 0, True, False ) ) # trying to remove also 0 heat
         df_wanted = np.invert( df_wanted )
     #		print( "df_wanted:", df_wanted.shape, "\n", df_wanted )
         removedNodesMask = torch.tensor( df_wanted )
     #		print( "removedNodesMask:", removedNodesMask.shape )#, "\n", removedNodesMask )
         print( "nodes_data:", nodes_data.shape ) #, "\n", nodes_data )
         idsToRemove = torch.tensor( nodes_data.index )[ removedNodesMask ]
-        
-    #		torch.set_printoptions( profile="full" )
         print( "idsToRemove:", idsToRemove.shape ) #"\n", torch.sort( idsToRemove ) )
-    #		torch.set_printoptions( profile="default" )
         
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
-    #		self.graph.ndata[ 'name' ] = ( torch.from_numpy ( nodes_data[ 'name' ].to_numpy() ) )#.float()        
         self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ listFeats ].values )
-        self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )#.float()
-        #self.graph.ndata[ secondLabel ] = ( torch.from_numpy ( nodes_data[ secondLabel ].to_numpy() ) )#.float()        
-    #		self.graph.ndata['powerHeat'] = torch.from_numpy (nodes_data['powerHeat'].to_numpy()).float()
-    #        	self.graph.ndata['irDropHeat'] = torch.from_numpy (nodes_data['irDropHeat'].to_numpy()).float()
-    #		self.graph.ndata['conCount'] = torch.from_numpy(nodes_data['conCount'].to_numpy())        #TODO possible feature, needs fix in yosys
+        self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
+        #self.graph.ndata[ secondLabel ] = ( torch.from_numpy ( nodes_data[ secondLabel ].to_numpy() ) )
 
         print( "---> BEFORE REMOVED NODES:")
         print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
@@ -257,7 +259,8 @@ class DataSetFromYosys( DGLDataset ):
         isolated_nodes = ( ( self.graph.in_degrees() == 0 ) & ( self.graph.out_degrees() == 0 ) ).nonzero().squeeze(1)
         print( "isolated_nodes:", isolated_nodes.shape ) #, "\n", isolated_nodes )
         self.graph.remove_nodes( isolated_nodes )
-        #self.graph = dgl.add_self_loop( self.graph ) 
+        if SELF_LOOP:
+            self.graph = dgl.add_self_loop( self.graph ) 
     ################################################################################################
         
         print( "\n---> AFTER REMOVED NODES:" )
@@ -321,32 +324,36 @@ def drawGraph( graph, graphName ):
 	
 
 class GAT( nn.Module ):
-	def __init__( self, in_size, hid_size, out_size, heads ):
-		super().__init__()
-		self.gat_layers = nn.ModuleList()
-		# three-layer GAT
-#		self.gat_layers.append(dglnn.GATConv(in_size, hid_size, heads[0], activation=F.elu))
-#		self.gat_layers.append(dglnn.GATConv(hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu))
-#		self.gat_layers.append(dglnn.GATConv(hid_size*heads[1], out_size, heads[2], residual=True, activation=None))
-		print("\n\nINIT GAT!!")
-		print("in_size:", in_size)
-		print("hid_size:", hid_size)
-		for k,head in enumerate( heads ):
-			print("head:", k,head)
-		print("out_size", out_size)
-		self.gat_layers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu, allow_zero_in_degree=True ) )
-		self.gat_layers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu, allow_zero_in_degree=True ) )
-		self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None, allow_zero_in_degree=True ) )
-
-	def forward( self, g, inputs ):
-		h = inputs
-		for i, layer in enumerate( self.gat_layers ):
-			h = layer( g, h )
-			if i == 2:  # last layer 
-				h = h.mean(1)
-			else:       # other layer(s)
-				h = h.flatten(1)
-		return h
+    def __init__( self, in_size, hid_size, out_size, heads ):
+        super().__init__()
+        self.gat_layers = nn.ModuleList()
+        # three-layer GAT
+        #		self.gat_layers.append(dglnn.GATConv(in_size, hid_size, heads[0], activation=F.elu))
+        #		self.gat_layers.append(dglnn.GATConv(hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu))
+        #		self.gat_layers.append(dglnn.GATConv(hid_size*heads[1], out_size, heads[2], residual=True, activation=None))
+        print("\n\nINIT GAT!!")
+        print("in_size:", in_size)
+        print("hid_size:", hid_size)
+        for k,head in enumerate( heads ):
+            print("head:", k,head)
+        print("out_size", out_size)
+        if SELF_LOOP:
+            self.gat_layers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu )) #, allow_zero_in_degree=True ) )
+            self.gat_layers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu )) #, allow_zero_in_degree=True ) )
+            self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None )) #, allow_zero_in_degree=True ) )
+        else:
+            self.gat_layers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu, allow_zero_in_degree=True ) )
+            self.gat_layers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu, allow_zero_in_degree=True ) )
+            self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None, allow_zero_in_degree=True ) )
+    def forward( self, g, inputs ):
+	    h = inputs
+	    for i, layer in enumerate( self.gat_layers ):
+		    h = layer( g, h )
+		    if i == 2:  # last layer 
+			    h = h.mean(1)
+		    else:       # other layer(s)
+			    h = h.flatten(1)
+	    return h
 
  
 def evaluate( g, features, labels, model ):#, mask ):
@@ -354,25 +361,25 @@ def evaluate( g, features, labels, model ):#, mask ):
     with torch.no_grad():
         if( features.dim() == 1 ):
             features = features.unsqueeze(1)
-        output = model( g, features ) 
-        #print("\t>>>> output before squeeze:", type(output), output.shape, "\n", output )
-        output = output.squeeze(1)
+        predicted = model( g, features ) 
+        #print("\t>>>> predicted before squeeze:", type(predicted), predicted.shape, "\n", predicted )
+        predicted = predicted.squeeze(1)
 #        torch.set_printoptions( profile="full" )
-#        print( "\t>>> features in evaluate:", features.shape, "\n", list ( features ) )
-#        print( "\t>>> labels   in evaluate:", labels.shape, "\n", labels )
-#        print("\t>>>> output after squeeze:", output.shape, "\n", output )
+#        print( "\t>>> features in evaluate:", type( features ), features.shape ) #"\n", list ( features ) )
+#        print( "\t>>> labels   in evaluate:", type( labels ), labels.shape ) #"\n", labels )
+#        print("\t>>>> predicted after squeeze:", type( predicted ), predicted.shape )# "\n", predicted )
 #        torch.set_printoptions( profile="default" )
              
-        #r2 = r2_score( labels.data.cpu.numpy(), output )
-        #print( "r2:", r2 )
+        score_r2 = r2_score( labels.data.cpu(), predicted.data.cpu() )
         kendall = KendallRankCorrCoef( variant = 'a' )
-        #score = kendall( labels.data.cpu(), output.squeeze(1) )
-        score_kendall = kendall( output, labels )
+        #score = kendall( labels.data.cpu(), predicted.squeeze(1) )
+        score_kendall = kendall( predicted, labels )
 #        print("score_kendall:", type( score_kendall ), str( score_kendall ), "\n", score_kendall,"\n\n")
-        return score_kendall
+        return score_kendall, score_r2
 
 def evaluate_in_batches( dataloader, device, model ):
-    total_score = 0
+    total_kendall = 0.0
+    total_r2      = 0.0
     for batch_id, batched_graph in enumerate( dataloader ):
 #        mask = batched_graph.ndata[ 'removedNodesMask' ]
         batched_graph = batched_graph.to( device )
@@ -380,9 +387,12 @@ def evaluate_in_batches( dataloader, device, model ):
         labels = batched_graph.ndata[ labelName ] #.float()
 #        print("features in evaluate_in_batches:", type(features), features.shape,"\n", features )
 #        print("labels in evaluate_in_batches:", type(labels), labels.shape,"\n", labels )
-        score = evaluate( batched_graph, features, labels, model )#, mask )
-        total_score += score
-    return total_score / (batch_id + 1) # return average score
+        score_kendall, score_r2 = evaluate( batched_graph, features, labels, model )#, mask )
+        total_kendall += score_kendall
+        total_kendall = total_kendall / (batch_id + 1)
+        total_r2      += score_r2
+        total_r2      = total_r2 / (batch_id + 1)
+    return total_kendall, total_r2 # return average score
 
 
 def train( train_dataloader, val_dataloader, device, model, writerName ):
@@ -395,7 +405,6 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
     
     loss_fcn = nn.MSELoss()
     optimizer = torch.optim.Adam( model.parameters(), lr=0.005, weight_decay=0 )
-    
     
     # training loop
     for epoch in range( numEpochs ):
@@ -432,11 +441,13 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
         if DEBUG:
             writer.add_scalar( "Loss Train", total_loss / (batch_id + 1), epoch )
             print("Epoch {:05d} | Loss {:.4f} |". format(epoch, total_loss / (batch_id + 1) ))
-            avg_score = evaluate_in_batches( val_dataloader, device, model )
-            writer.add_scalar( "Score Valid", avg_score, epoch )
+            kendall, r2 = evaluate_in_batches( val_dataloader, device, model )
+            writer.add_scalar( "Score Valid Kendall", kendall, epoch )
+            writer.add_scalar( "Score Valid R2", r2, epoch )
             if ( epoch + 1 ) % 5 == 0:
                 #avg_score = evaluate_in_batches( val_dataloader, device, model) # evaluate r2-score instead of loss
-                print("                            Acc. (score) {:.4f} ". format(avg_score))
+                print( "                            Kendall {:.4f} ". format( kendall ) )
+                print( "                            R2      {:.4f} ". format( r2 ) )
         
     writer.flush()
     writer.close()
@@ -444,11 +455,19 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
 
 if __name__ == '__main__':
     print(f'Training Yosys Dataset with DGL built-in GATConv module.')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    #device = torch.device('cpu')
+    
+    if CUDA:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    else:
+        device = torch.device('cpu')
 
     listDir = []	
-    for designPath in Path( Path.cwd() / 'dataSet' ).iterdir():
+    if COLAB:
+        dsPath = '/content/drive/MyDrive/tese - datasets/dataSet'
+    else:
+        dsPath = Path.cwd() / 'dataSet'
+        
+    for designPath in Path( dsPath ).iterdir():
 	    if designPath.is_dir() and "runs" not in str( designPath ):
 		    print("designPath:", designPath )
 		    listDir.append( designPath )
@@ -473,7 +492,7 @@ if __name__ == '__main__':
     #	df = df.drop( df.index[ df[ labelName ] < 0 ] )
     writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
     df = aggregateData( listDir, 'preProcessedGatesToHeat.csv' )
-#    df = df.drop( df.index[ df[ labelName ] < 0 ])
+    df = df.drop( df.index[ df[ labelName ] < 0 ])
     print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
     for col in df:
 	    print( "describe:\n", df[ col ].describe() )
@@ -494,13 +513,15 @@ if __name__ == '__main__':
 	    f.write( ",labelName:" + labelName )
 	    f.write( ",features:" ) 
 	    f.write( ";".join( listFeats ) )
-	    f.write( "\nCircuit Valid, Circuit Test, Train, Valid, Test\n" )
+	    f.write( "\nCircuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2\n" )
 	    
     split = [ 0.9, 0.05, 0.05 ]
     #shuffle( listDir )
     for i in range( 0, len( listDir ) - 1 ):
         for j in range( 0, len( listDir ) - 1 ):
             if i == j:
+                continue
+            if j > 2:
                 continue
             print( "##################################################################################" )
             print( "############################# New Run ############################################" )
@@ -525,7 +546,7 @@ if __name__ == '__main__':
 
             #features = torch.cat( [train_dataset[0].ndata[ featName ][:,None]], dim=1 ) #TODO sometimes shape is unidimension
             in_size = features.shape[1]
-            print("features.shape",features.shape)
+            print( "features.shape", features.shape )
 
             #	node_labels = train_dataset[0].ndata[ labelName ].float()
             #	node_labels[ node_labels == -1 ] = 0
@@ -537,11 +558,11 @@ if __name__ == '__main__':
             model = GAT( in_size, 256, out_size, heads=[4,4,6]).to(device)
             #model = SAGE( in_feats = in_size, hid_feats=100, out_feats = out_size )
 
-            print( "\n###################"   )
+            print( "\n###################" )
             print( "## MODEL DEFINED ##"   )
             print( "###################\n" )
 
-            train_dataloader = GraphDataLoader( train_dataset, batch_size=2 )
+            train_dataloader = GraphDataLoader( train_dataset, batch_size=1 )
             val_dataloader   = GraphDataLoader( val_dataset,   batch_size=1 )
             test_dataloader  = GraphDataLoader( test_dataset,  batch_size=1 )
 
@@ -570,15 +591,19 @@ if __name__ == '__main__':
             train( train_dataloader, val_dataloader, device, model, writerName )
 
             print( '######################\n## Final Evaluation ##\n######################\n' )    
-            test_score = evaluate_in_batches( test_dataloader, device, model )
-            valid_score = evaluate_in_batches( val_dataloader, device, model )
-            train_score = evaluate_in_batches( train_dataloader, device, model )
-            print( "Train Accuracy {:.4f}".format( train_score ) )
-            print( "Valid Accuracy {:.4f}".format( valid_score ) )
-            print( "Test Accuracy {:.4f}".format( test_score ) )
+            test_kendall, test_r2 = evaluate_in_batches( test_dataloader, device, model )
+            valid_kendall, valid_r2 = evaluate_in_batches( val_dataloader, device, model )
+            train_kendall, train_r2 = evaluate_in_batches( train_dataloader, device, model )
+            print( "Train Kendall {:.4f}".format( train_kendall ) )
+            print( "Valid Kendall {:.4f}".format( valid_kendall ) )
+            print( "Test Kendall {:.4f}".format( test_kendall ) )
+            print( "Train R2 {:.4f}".format( train_r2 ) )
+            print( "Valid R2 {:.4f}".format( valid_r2 ) )
+            print( "Test R2 {:.4f}".format( test_r2 ) )
 
             with open( summary, 'a' ) as f:
-                f.write( val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_score.item() ) +","+ str( valid_score.item() ) +","+ str( test_score.item() )  +"\n")
+                f.write( val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
+                f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() )  +"\n")
                  			
             del model
             del train_dataset
