@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import shutil
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 import matplotlib.pyplot as plt
@@ -39,17 +40,22 @@ import networkx as nx #drawing graphs
 #print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 #print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [ 'type' , 'size' ]
-featName = 'feat'#listFeats[0]
+listFeats = [ 'type' ] # , 'size' ]
+featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-numEpochs = 150
+numEpochs = 500
+step      = 0.005
 
-DEBUG     = True
+
+DEBUG     = False
 CUDA      = True
+DOLEARN   = True
+
+
 SELF_LOOP = True
 COLAB     = False
 
@@ -65,7 +71,7 @@ def preProcessData( listDir ):
     #	regexp = re.compile( r'(^.*)\_X(\d?\d)$' ) #_X1 works ok for nangate
     regexp = re.compile( r'(^.*)\_?[x|xp](\d?\d)', re.IGNORECASE ) 
     for path in listDir:
-	    print( "Circuit:",path )
+	    #print( "Circuit:",path )
 	    gateToHeat = pd.read_csv( path / 'gatesToHeat.csv', index_col = 'id', dtype = { 'type':'category' } )
 	    labelsAux = pd.concat( [ labelsAux, gateToHeat[ labelName ] ], names = [ labelName ] )
 	    graphs[ path ] = gateToHeat#.append( gateToHeat )
@@ -83,8 +89,11 @@ def preProcessData( listDir ):
 					        nameToCategory[ match.group( 1 ) ] =  len( nameToCategory ) + 1
 				        #typeTo2Categories[ cellType ] = [ nameToCategory[ match.group( 0 ) ], match.group( 1 ) ]
 				        if cellType not in typeToNameCat:
-					        typeToNameCat[ cellType ] = nameToCategory[ match.group( 1 ) ]
-					        typeToSize[ cellType ]    = int( match.group( 2 ) )
+				            if len( listFeats ) == 2:
+					            typeToNameCat[ cellType ] = nameToCategory[ match.group( 1 ) ]
+					            typeToSize[ cellType ]    = int( match.group( 2 ) )
+				            else:
+				                typeToNameCat[ cellType ] = len( typeToNameCat )
 		        else:
 			        print( "WARNING: Unexpected cell type:", cellType )    
 			        typeToNameCat[ cellType ] = -1
@@ -97,7 +106,7 @@ def preProcessData( listDir ):
     ##################### FOR GLOBAL NORMALIZATION ON HEAT VALUES ###########################
     df = labelsAux
     print( "df before remove -1:\n", type(df), "\n", df,"\n")
-    #    df = df.drop( df[ df < 0 ] )
+    #    df = ( df[ df < 0 ] )
 #    df = df.loc[ df >= 0 ]
     df = df.loc[ df > 0 ] # trying to remove also 0 heat
     print( "df after remove -1:\n", df,"\n")
@@ -118,7 +127,7 @@ def preProcessData( listDir ):
             #labelToStandard[ key ] = ( key - median ) / ( p75 - p25 ) # quantile
             labelToStandard[ key ] = ( key - dfMin ) / ( dfMax - dfMin ) # 0 to 1
             #labelToStandard[ key ] = ( key - mean ) / std  # z value (mean)
-    print( "\n\n\labelToStandard:\n", labelToStandard, "size:", len( labelToStandard  ) )
+    print( "\n\n\labelToStandard:\n", sorted( labelToStandard.items() ), "size:", len( labelToStandard  ) )
     #######################################################################
 	    
     print( "\n\n\nnameToCategory:\n", nameToCategory, "size:", len( nameToCategory  ) )
@@ -137,7 +146,7 @@ def preProcessData( listDir ):
     #			    labelToStandard[ k ] = ( k - dfMin ) / ( dfMax - dfMin )# 0 to 1
     #			#                labelToStandard[ k ] = ( k - series.mean() ) / series.std() # z value
 
-	    g[ 'size' ]    = g[ rawFeatName  ].replace( typeToSize )
+	    #g[ 'size' ]    = g[ rawFeatName  ].replace( typeToSize )
 	    g[ rawFeatName ]  = g[ rawFeatName  ].replace( typeToNameCat )
 	    g[ labelName ] = g[ labelName ].replace( labelToStandard )
 	    
@@ -167,9 +176,9 @@ def writeDFrameData( listDir, csvName, outName ):
 			edgesData = pd.read_csv( path / 'DGLedges.csv' )
 			print( "ic name split:", str( path ).rsplit( '/' ) )
 			icName = str( path ).rsplit( '/' )[-1]
-			f.write( icName + "," + str(inputData.shape[0]) + "," + str(edgesData.shape[0]) + "," )
-			f.write( str(( inputData[ inputData [ labelName ] > 0 ] ).min()) + "," + str(inputData[ labelName ].max()) + "," )
-			f.write( str(inputData[ secondLabel ].min()) + "," + str(inputData[ secondLabel ].max()) + "\n" )
+			f.write( icName + "," + str( inputData.shape[0] ) + "," + str( edgesData.shape[0] ) + "," )
+			f.write( str( ( inputData [ labelName ] ).min() ) + "," + str(inputData[ labelName ].max() ) + "," )
+			f.write( str( inputData[ secondLabel ].min()) + "," + str(inputData[ secondLabel ].max()) + "\n" )
 	
 
 
@@ -321,6 +330,71 @@ def drawGraph( graph, graphName ):
 #    print("len graph.ndata:",len(graph.ndata))
 #    print("type graph.ndata:",type(graph.ndata))
 
+
+def drawHeat( label, predict, drawHeatName ):
+
+    sorted_pairs = sorted( zip( label, predict ) )
+    sorted_label, sorted_predict = zip( *sorted_pairs )
+    fig, axes = plt.subplots( nrows = 2, ncols = 1, figsize = ( 10, 10 ) )
+    axes[0].plot( sorted_label )
+    #axes[0].bar( range( len( sorted_label ) ), sorted_label )
+    axes[0].set_title( 'Label' )
+    axes[0].set_xlabel( 'Index' )
+    axes[0].set_ylabel( 'Value' )
+
+    axes[1].plot( sorted_predict )
+    #axes[1].bar( range( len( sorted_predict ) ), sorted_predict )
+    axes[1].set_title( 'Predicted' )
+    axes[1].set_xlabel( 'Index' )
+    axes[1].set_ylabel( 'Value' ) 
+
+    plt.subplots_adjust( hspace=0.3 )
+    auxName = drawHeatName.replace( "/", "/columns/", 1 )
+    # first_slash = auxName.find('/')
+    # if first_slash != -1:
+    #     auxName[ :first_slash ] + "/columns/" + auxName[ first_slash+1: ]
+    print( "auxName:", auxName )
+    plt.savefig( auxName )
+    plt.close( fig ) 
+
+
+    vminLabel = np.min( label )
+    vmaxLabel = np.max( label )
+    vminPred = np.min( predict )
+    vmaxPred = np.max( predict )
+    
+    size = int( np.ceil( np.sqrt( len( label ) ) ) )
+    # sorted_label = np.pad( np.array( sorted_label ), ( 0, size**2 - len( label ) ), mode='constant' ).reshape( size, size )
+    # sorted_predict = np.pad( np.array( sorted_predict ), ( 0, size**2 - len( predict ) ), mode='constant' ).reshape( size, size )
+    label = np.pad( np.array( label ), ( 0, size**2 - len( label ) ), mode='constant', constant_values = vminLabel ).reshape( size, size )
+    predict = np.pad( np.array( predict ), ( 0, size**2 - len( predict ) ), mode='constant', constant_values = vminPred ).reshape( size, size )
+    # vmin = min( np.min( sorted_label ), np.min( sorted_predict ) )
+    # vmax = max( np.max( sorted_label ), np.max( sorted_predict ) )
+    fig, ax = plt.subplots( nrows = 1, ncols = 2, figsize = ( 10, 5 ) )
+
+    im1 = ax[0].imshow( label, cmap='YlGnBu', vmin = vminLabel, vmax = vmaxLabel )
+    ax[0].set_title( 'Labels' )
+    ax[0].set_xlabel( 'Column Index' )
+    ax[0].set_ylabel( 'Row Index' )
+    fig.colorbar( im1, ax = ax[0] )
+
+    im2 = ax[1].imshow( predict, cmap='YlGnBu', vmin = vminPred, vmax = vmaxPred )
+    ax[1].set_title( 'Predicted' )
+    ax[1].set_xlabel( 'Column Index' )
+    ax[1].set_ylabel( 'Row Index' )
+    fig.colorbar( im2, ax = ax[1] )
+
+    plt.subplots_adjust( wspace=0.3 )
+    auxName = drawHeatName.replace( "/", "/heatmaps/", 1 )
+    # auxName = drawHeatName
+    # first_slash = auxName.find("/")
+    # if first_slash != -1:
+    #     auxName[ : first_slash ] + "/heatmaps/" + auxName[ first_slash + 1 : ]
+    print( "auxName:", auxName )
+    plt.savefig( auxName )
+    plt.close( fig )
+   
+    
 	
 
 class GAT( nn.Module ):
@@ -337,26 +411,31 @@ class GAT( nn.Module ):
         for k,head in enumerate( heads ):
             print("head:", k,head)
         print("out_size", out_size)
-        if SELF_LOOP:
-            self.gat_layers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu )) #, allow_zero_in_degree=True ) )
-            self.gat_layers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu )) #, allow_zero_in_degree=True ) )
-            self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None )) #, allow_zero_in_degree=True ) )
-        else:
-            self.gat_layers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu, allow_zero_in_degree=True ) )
-            self.gat_layers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu, allow_zero_in_degree=True ) )
-            self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None, allow_zero_in_degree=True ) )
+        # if SELF_LOOP:
+        #     self.gat_layers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu )) #, allow_zero_in_degree=True ) )
+        #     self.gat_layers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu )) #, allow_zero_in_degree=True ) )
+        #     self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None )) #, allow_zero_in_degree=True ) )
+        # else:
+        #     self.gat_layers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu, allow_zero_in_degree=True ) )
+        #     self.gat_layers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu, allow_zero_in_degree=True ) )
+        #     self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None, allow_zero_in_degree=True ) )
+        self.gat_layers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation = F.relu, allow_zero_in_degree = not SELF_LOOP ))# , feat_drop = 0.05, attn_drop = 0.05 ) )
+        self.gat_layers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation = F.relu, allow_zero_in_degree = not SELF_LOOP )) #, feat_drop = 0.5, attn_drop = 0.5 ) )
+        # self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], hid_size, heads[1], residual=True, activation=F.relu, allow_zero_in_degree = not SELF_LOOP ) )
+        self.gat_layers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None, allow_zero_in_degree = not SELF_LOOP ) )
+        
     def forward( self, g, inputs ):
-	    h = inputs
-	    for i, layer in enumerate( self.gat_layers ):
-		    h = layer( g, h )
-		    if i == 2:  # last layer 
-			    h = h.mean(1)
-		    else:       # other layer(s)
-			    h = h.flatten(1)
-	    return h
+        h = inputs
+        for i, layer in enumerate( self.gat_layers ):
+            h = layer( g, h )
+            if i == 2:  # last layer 
+                h = h.mean(1)
+            else:       # other layer(s)
+                h = h.flatten(1)
+        return h
 
  
-def evaluate( g, features, labels, model ):#, mask ):
+def evaluate( g, features, labels, model, imageName ):
     model.eval()
     with torch.no_grad():
         if( features.dim() == 1 ):
@@ -364,36 +443,49 @@ def evaluate( g, features, labels, model ):#, mask ):
         predicted = model( g, features ) 
         #print("\t>>>> predicted before squeeze:", type(predicted), predicted.shape, "\n", predicted )
         predicted = predicted.squeeze(1)
-#        torch.set_printoptions( profile="full" )
 #        print( "\t>>> features in evaluate:", type( features ), features.shape ) #"\n", list ( features ) )
-#        print( "\t>>> labels   in evaluate:", type( labels ), labels.shape ) #"\n", labels )
-#        print("\t>>>> predicted after squeeze:", type( predicted ), predicted.shape )# "\n", predicted )
-#        torch.set_printoptions( profile="default" )
-             
+        print( "\t>>>> labels   in evaluate:", type( labels ), labels.shape, labels[:10] ) #"\n", labels )
+        print( "\t>>>> predicted after squeeze:", type( predicted ), predicted.shape, predicted[:10] )# "\n", predicted )
+            
         score_r2 = r2_score( labels.data.cpu(), predicted.data.cpu() )
         kendall = KendallRankCorrCoef( variant = 'a' )
-        #score = kendall( labels.data.cpu(), predicted.squeeze(1) )
         score_kendall = kendall( predicted, labels )
 #        print("score_kendall:", type( score_kendall ), str( score_kendall ), "\n", score_kendall,"\n\n")
+        if len( imageName ) > 0:
+            imageName = imageName +"k{:.4f}".format( score_kendall ) + ".png"
+            drawHeat( list( labels.data.cpu() ), list( predicted.data.cpu() ), imageName )
         return score_kendall, score_r2
 
 def evaluate_in_batches( dataloader, device, model ):
     total_kendall = 0.0
     total_r2      = 0.0
+    # names = dataloader.dataset.names
+    # print("names in evaluate_in_batches:", names )
     for batch_id, batched_graph in enumerate( dataloader ):
-#        mask = batched_graph.ndata[ 'removedNodesMask' ]
         batched_graph = batched_graph.to( device )
-        features = batched_graph.ndata[ featName ].float()
-        labels = batched_graph.ndata[ labelName ] #.float()
+        features = batched_graph.ndata[ featName ].float() #TODO remove this float and make work.
+        labels   = batched_graph.ndata[ labelName ]
+        
 #        print("features in evaluate_in_batches:", type(features), features.shape,"\n", features )
 #        print("labels in evaluate_in_batches:", type(labels), labels.shape,"\n", labels )
-        score_kendall, score_r2 = evaluate( batched_graph, features, labels, model )#, mask )
+        score_kendall, score_r2 = evaluate( batched_graph, features, labels, model, "" )
+        print( "partial Kendall:", score_kendall, ", r2:", score_r2, ", batch_id:", batch_id )
         total_kendall += score_kendall
-        total_kendall = total_kendall / (batch_id + 1)
         total_r2      += score_r2
-        total_r2      = total_r2 / (batch_id + 1)
+    total_kendall =  total_kendall / (batch_id + 1)
+    total_r2      =  total_r2 / (batch_id + 1)
     return total_kendall, total_r2 # return average score
 
+
+def evaluate_single( graph, device, model, name ):
+    total_kendall = 0.0
+    total_r2      = 0.0
+    features = g.ndata[ featName ].float() #TODO remove this float and make work.
+    labels   = g.ndata[ labelName ]
+    print( "evaluate--->", name )
+    score_kendall, score_r2 = evaluate( graph, features, labels, model, name )
+    print( "Single graph score - Kendall:", score_kendall, ", r2:", score_r2 )
+    return score_kendall, score_r2
 
 def train( train_dataloader, val_dataloader, device, model, writerName ):
     print( "device in train:", device )
@@ -404,7 +496,7 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
 #    loss_fcn = nn.L1Loss() 
     
     loss_fcn = nn.MSELoss()
-    optimizer = torch.optim.Adam( model.parameters(), lr=0.005, weight_decay=0 )
+    optimizer = torch.optim.Adam( model.parameters(), lr = step, weight_decay = 0 )
     
     # training loop
     for epoch in range( numEpochs ):
@@ -442,8 +534,9 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
             writer.add_scalar( "Loss Train", total_loss / (batch_id + 1), epoch )
             print("Epoch {:05d} | Loss {:.4f} |". format(epoch, total_loss / (batch_id + 1) ))
             kendall, r2 = evaluate_in_batches( val_dataloader, device, model )
-            writer.add_scalar( "Score Valid Kendall", kendall, epoch )
-            writer.add_scalar( "Score Valid R2", r2, epoch )
+            writer.add_scalar( "Score TEST Kendall", kendall, epoch )
+            kendall, r2 = evaluate_in_batches( train_dataloader, device, model )
+            writer.add_scalar( "Score TRAIN Kendall", kendall, epoch )
             if ( epoch + 1 ) % 5 == 0:
                 #avg_score = evaluate_in_batches( val_dataloader, device, model) # evaluate r2-score instead of loss
                 print( "                            Kendall {:.4f} ". format( kendall ) )
@@ -461,6 +554,18 @@ if __name__ == '__main__':
     else:
         device = torch.device('cpu')
 
+
+    if os.path.exists( "runs" ):
+        shutil.rmtree( "runs" )
+    imageOutput = "image_outputs"
+    if os.path.exists( imageOutput ):
+        shutil.rmtree( imageOutput )
+    os.makedirs( imageOutput )
+    aux = imageOutput + "/columns"
+    os.makedirs( aux )
+    aux = imageOutput + "/heatmaps"
+    os.makedirs( aux )
+
     listDir = []	
     if COLAB:
         dsPath = '/content/drive/MyDrive/tese - datasets/dataSet'
@@ -475,141 +580,162 @@ if __name__ == '__main__':
     ##################################################################################
     ############################# Pre Processing #####################################
     ##################################################################################
-    #if( featName != 'feat' ):
     writeDFrameData( listDir, 'gatesToHeat.csv', "DSinfoBeforePreProcess.csv" )
     df = aggregateData( listDir, 'gatesToHeat.csv' )
     print( "\n\n#######################\n## BEFORE PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
     for col in df:
-	    print( "describe:\n", df[ col ].describe() )
+        print( "describe:\n", df[ col ].describe() )
     df.to_csv( "aggregatedDFBefore.csv" )
+    df = df.drop( df.index[ df[ labelName ] < 0 ] )
     df.hist( bins = 50, figsize = (15,12) )
     plt.savefig( "BeforePreProcess-train+valid+test" )
 
 
     preProcessData( listDir )
 	            
-    #	df = df.drop( df.index[ df[ rawFeatName ] < 0 ] )
-    #	df = df.drop( df.index[ df[ labelName ] < 0 ] )
     writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
     df = aggregateData( listDir, 'preProcessedGatesToHeat.csv' )
-    df = df.drop( df.index[ df[ labelName ] < 0 ])
     print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
     for col in df:
-	    print( "describe:\n", df[ col ].describe() )
+	    print( "\n####describe:\n", df[ col ].describe() )
     df.to_csv( "aggregatedDFAfter.csv" )
+    df = df.drop( df.index[ df[ labelName ] < 0 ])
+    df = df.drop( df.index[ df[ rawFeatName ] < 0 ] )
     df.hist( bins = 50, figsize = (15,12) )
     plt.savefig( "AfterPreProcess-train+valid+test" )
 
     #df.plot( kind = "scatter",  x = "placementHeat", y = "type" )
     #    df.plot.area( figsize = (15,12), subplots = True )
-    #    plt.savefig( "scatterPlacement" )
+    #    .savefig( "scatterPlacement" )
     ################################################################################
     ################################################################################    
 
-    summary = "runSummary.csv"
-    with open( summary, 'w' ) as f:
-	    f.write( "#Circuits:" + str( len( listDir ) ) )
-	    f.write( ",epochs:" + str( numEpochs ) )
-	    f.write( ",labelName:" + labelName )
-	    f.write( ",features:" ) 
-	    f.write( ";".join( listFeats ) )
-	    f.write( "\nCircuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2\n" )
+
+    if DOLEARN:
+        summary = "runSummary.csv"
+        with open( summary, 'w' ) as f:
+            f.write( "#Circuits:" + str( len( listDir ) ) )
+            f.write( ",epochs:" + str( numEpochs ) )
+            f.write( ",labelName:" + labelName )
+            f.write( ",features:" ) 
+            f.write( ";".join( listFeats ) )
+            f.write( "\ni,j,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2\n" )
 	    
-    split = [ 0.9, 0.05, 0.05 ]
-    #shuffle( listDir )
-    for i in range( 0, len( listDir ) - 1 ):
-        for j in range( 0, len( listDir ) - 1 ):
-            if i == j:
-                continue
-            if j > 2:
-                continue
-            print( "##################################################################################" )
-            print( "############################# New Run ############################################" )
-            print( "##################################################################################" )
-            currentDir = listDir.copy()
+        split = [ 0.9, 0.05, 0.05 ]
+        #shuffle( listDir )
+        # for i in range( 0, len( listDir ) - 1 ):
+        #     for j in range( 2, len( listDir ) - 1 ):
+        #         if i == j:
+        #             continue
+        #         if j > 2:
+        #             continue
+        for i in range( 0, len( listDir ) ):
+            for j in range( 2, 3 ):
+                print( "##################################################################################" )
+                print( "############################# New Run ############################################" )
+                print( "##################################################################################" )
+                currentDir = listDir.copy()
 
-            auxString = currentDir[ -1 ]
-            currentDir[ -1 ] = currentDir[ i ]
-            currentDir[ i ] = auxString
+                auxString = currentDir[ -1 ]
+                currentDir[ -1 ] = currentDir[ i ]
+                currentDir[ i ] = auxString
 
-            auxString = currentDir[ -2 ]
-            currentDir[ -2 ] = currentDir[ j ]
-            currentDir[ j ] = auxString
+                auxString = currentDir[ -2 ]
+                currentDir[ -2 ] = currentDir[ j ]
+                currentDir[ j ] = auxString
 
-            train_dataset = DataSetFromYosys( currentDir, split, mode='train' )
-            val_dataset   = DataSetFromYosys( currentDir, split, mode='valid' )
-            test_dataset  = DataSetFromYosys( currentDir, split, mode='test'  )
+                train_dataset = DataSetFromYosys( currentDir, split, mode='train' )
+                val_dataset   = DataSetFromYosys( currentDir, split, mode='valid' )
+                test_dataset  = DataSetFromYosys( currentDir, split, mode='test'  )
 
-            features = train_dataset[0].ndata[ featName ]      
-            if( features.dim() == 1 ):
-                features = features.unsqueeze(1)
+                features = train_dataset[0].ndata[ featName ]      
+                if( features.dim() == 1 ):
+                    features = features.unsqueeze(1)
 
-            #features = torch.cat( [train_dataset[0].ndata[ featName ][:,None]], dim=1 ) #TODO sometimes shape is unidimension
-            in_size = features.shape[1]
-            print( "features.shape", features.shape )
+                #features = torch.cat( [train_dataset[0].ndata[ featName ][:,None]], dim=1 ) #TODO sometimes shape is unidimension
+                in_size = features.shape[1]
+                print( "features.shape", features.shape )
 
-            #	node_labels = train_dataset[0].ndata[ labelName ].float()
-            #	node_labels[ node_labels == -1 ] = 0
-            #	out_size = int(node_labels.max().item() + 1)
-            #    out_size = train_dataset.num_labels
-            out_size = 1 #TODO parametrize this
+                #	node_labels = train_dataset[0].ndata[ labelName ].float()
+                #	node_labels[ node_labels == -1 ] = 0
+                #	out_size = int(node_labels.max().item() + 1)
+                #    out_size = train_dataset.num_labels
+                out_size = 1 #TODO parametrize this
 
-            print("in_size",in_size,",  out_size",out_size)
-            model = GAT( in_size, 256, out_size, heads=[4,4,6]).to(device)
-            #model = SAGE( in_feats = in_size, hid_feats=100, out_feats = out_size )
+                print("in_size",in_size,",  out_size",out_size)
+                model = GAT( in_size, 256, out_size, heads=[4,4,6]).to(device)
+                #model = SAGE( in_feats = in_size, hid_feats=100, out_feats = out_size )
 
-            print( "\n###################" )
-            print( "## MODEL DEFINED ##"   )
-            print( "###################\n" )
+                print( "\n###################" )
+                print( "## MODEL DEFINED ##"   )
+                print( "###################\n" )
 
-            train_dataloader = GraphDataLoader( train_dataset, batch_size=1 )
-            val_dataloader   = GraphDataLoader( val_dataset,   batch_size=1 )
-            test_dataloader  = GraphDataLoader( test_dataset,  batch_size=1 )
+                train_dataloader = GraphDataLoader( train_dataset, batch_size=1 )
+                val_dataloader   = GraphDataLoader( val_dataset,   batch_size=1 )
+                test_dataloader  = GraphDataLoader( test_dataset,  batch_size=1 )
 
-            for batch_id, batched_graph in enumerate( train_dataloader ):
-                batched_graph = batched_graph.to( device )
-                #print("batch_id",batch_id)#"->batched_graph",type(batched_graph),"\n",batched_graph)
+                print( "\n###################"   )
+                print( "### SPLIT INFO ####"   )
+                print( "###################"   )
+                train_dataset.printDataset()    
+                val_dataset.printDataset()    
+                test_dataset.printDataset()  
+                print( "->original:   ", end="" )
+                for item in listDir:
+                    print( str( item ).rsplit( '/' )[-1], end=", " )
+                print( "\n" )
+                print( "->currentDir: ", end="" )
+                for item in currentDir:
+                    print( str( item ).rsplit( '/' )[-1], end=", " )
+                print( "\n" )
+                print( "i:", i, "j:", j )
+                print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
 
-            print( "\n###################"   )
-            print( "### SPLIT INFO ####"   )
-            print( "###################"   )
-            train_dataset.printDataset()    
-            val_dataset.printDataset()    
-            test_dataset.printDataset()  
-            print( "->original:   ", end="" )
-            for item in listDir:
-                print( str( item ).rsplit( '/' )[-1], end=", " )
-            print( "\n" )
-            print( "->currentDir: ", end="" )
-            for item in currentDir:
-                print( str( item ).rsplit( '/' )[-1], end=", " )
-            print( "\n" )
-            print( "i:", i, "j:", j )
-            print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
+                writerName = "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) ) + "-V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
+                train( train_dataloader, test_dataloader, device, model, writerName )
 
-            writerName = "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) ) + "-V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
-            train( train_dataloader, val_dataloader, device, model, writerName )
+                print( '######################\n## Final Evaluation ##\n######################\n' )
+                for k in range( len( train_dataset ) ):
+                    g = train_dataset[k].to( device )
+                    name = train_dataset.names[k]
+                    name = imageOutput + "/train-" + name +"-i"+ str(i)+"j"+ str(j)
+                    print( "))))))) executing single evaluation on ", name, "-", k )
+                    train_kendall, train_r2 = evaluate_single( g, device, model, name )
+                    print( "Single Train Kendall {:.4f}".format( train_kendall ) )
+                    print( "Single Train R2 {:.4f}".format( train_r2 ) )
+                g = val_dataset[0].to( device )
+                name = val_dataset.names[0]
+                name = imageOutput + "/valid-" + name +"-i"+ str(i)+"j"+ str(j)
+                valid_kendall, valid_r2 = evaluate_single ( g, device, model, name )
 
-            print( '######################\n## Final Evaluation ##\n######################\n' )    
-            test_kendall, test_r2 = evaluate_in_batches( test_dataloader, device, model )
-            valid_kendall, valid_r2 = evaluate_in_batches( val_dataloader, device, model )
-            train_kendall, train_r2 = evaluate_in_batches( train_dataloader, device, model )
-            print( "Train Kendall {:.4f}".format( train_kendall ) )
-            print( "Valid Kendall {:.4f}".format( valid_kendall ) )
-            print( "Test Kendall {:.4f}".format( test_kendall ) )
-            print( "Train R2 {:.4f}".format( train_r2 ) )
-            print( "Valid R2 {:.4f}".format( valid_r2 ) )
-            print( "Test R2 {:.4f}".format( test_r2 ) )
+                print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
+                print( "Single valid R2 {:.4f}".format( valid_r2 ) )
+                g = test_dataset[0].to( device )
+                name = test_dataset.names[0]
+                name = imageOutput + "/test-" + name +"-i"+ str(i)+"j"+ str(j)
+                test_kendall, test_r2   = evaluate_single ( g, device, model, name )
 
-            with open( summary, 'a' ) as f:
-                f.write( val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
-                f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() )  +"\n")
-                 			
-            del model
-            del train_dataset
-            del val_dataset
-            del test_dataset
-            del train_dataloader
-            del val_dataloader
-            del test_dataloader
+                #TODO change this train to new loop with single0
+                train_kendall, train_r2 = evaluate_in_batches( train_dataloader, device, model )
+                print( "Total Train Kendall {:.4f}".format( train_kendall ) )
+                print( "Total Train R2 {:.4f}".format( train_r2 ) )
+                
+                # test_kendall, test_r2   = evaluate_in_batches( test_dataloader, device, model )
+                # valid_kendall, valid_r2 = evaluate_in_batches( val_dataloader, device, model )
+                # print( "Valid Kendall {:.4f}".format( valid_kendall ) ) #
+                # print( "Test Kendall {:.4f}".format( test_kendall ) )
+                # print( "Valid R2 {:.4f}".format( valid_r2 ) )
+                # print( "Test R2 {:.4f}".format( test_r2 ) )
+
+                with open( summary, 'a' ) as f:
+                    f.write( str(i) + ","+ str(j) +","+ val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
+                    f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() )  +"\n")
+                     			
+                del model
+                del train_dataset
+                del val_dataset
+                del test_dataset
+                del train_dataloader
+                del val_dataloader
+                del test_dataloader
 
