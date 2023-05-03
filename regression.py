@@ -51,7 +51,7 @@ numEpochs = 500
 step      = 0.005
 
 
-DEBUG     = False
+DEBUG     = 2
 CUDA      = True
 DOLEARN   = True
 
@@ -303,17 +303,17 @@ class DataSetFromYosys( DGLDataset ):
     
 
 class SAGE( nn.Module ):
-	def __init__(self, in_feats, hid_feats, out_feats):
-		super().__init__()
-		self.conv1 = dglnn.SAGEConv( in_feats=in_feats, out_feats=hid_feats, aggregator_type='lstm' )
-		self.conv2 = dglnn.SAGEConv( in_feats=hid_feats, out_feats=out_feats, aggregator_type='lstm' )
+    def __init__( self, in_feats, hid_feats, out_feats):
+        super().__init__()
+        self.conv1 = dglnn.SAGEConv( in_feats = in_feats, out_feats = hid_feats, aggregator_type = 'lstm' )
+        self.conv2 = dglnn.SAGEConv( in_feats = hid_feats, out_feats = out_feats, aggregator_type = 'lstm' )
 
-	def forward(self, graph, inputs):
-		# inputs are features of nodes
-		h = self.conv1( graph, inputs )
-		h = F.relu(h)
-		h = self.conv2( graph, h )
-		return h
+    def forward(self, graph, inputs):
+        # inputs are features of nodes
+        h = self.conv1( graph, inputs )
+        h = F.relu(h)
+        h = self.conv2( graph, h )
+        return h
 
 
 def drawGraph( graph, graphName ):
@@ -530,17 +530,18 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
             optimizer.step()
             total_loss += loss.item()
                         
-        if DEBUG:
+        if DEBUG > 0 :
+            print("Epoch {:05d} | Loss {:.4f} |". format( epoch, total_loss / (batch_id + 1) ))
+            if ( epoch + 1 ) % 5 == 0:
+                print( "                            Kendall {:.4f} ". format( kendall ) )
+                print( "                            R2      {:.4f} ". format( r2 ) )
+        if DEBUG == 2:
             writer.add_scalar( "Loss Train", total_loss / (batch_id + 1), epoch )
-            print("Epoch {:05d} | Loss {:.4f} |". format(epoch, total_loss / (batch_id + 1) ))
             kendall, r2 = evaluate_in_batches( val_dataloader, device, model )
             writer.add_scalar( "Score TEST Kendall", kendall, epoch )
             kendall, r2 = evaluate_in_batches( train_dataloader, device, model )
             writer.add_scalar( "Score TRAIN Kendall", kendall, epoch )
-            if ( epoch + 1 ) % 5 == 0:
-                #avg_score = evaluate_in_batches( val_dataloader, device, model) # evaluate r2-score instead of loss
-                print( "                            Kendall {:.4f} ". format( kendall ) )
-                print( "                            R2      {:.4f} ". format( r2 ) )
+            
         
     writer.flush()
     writer.close()
@@ -662,13 +663,18 @@ if __name__ == '__main__':
                 #    out_size = train_dataset.num_labels
                 out_size = 1 #TODO parametrize this
 
-                print("in_size",in_size,",  out_size",out_size)
-                model = GAT( in_size, 256, out_size, heads=[4,4,6]).to(device)
-                #model = SAGE( in_feats = in_size, hid_feats=100, out_feats = out_size )
+                print( "in_size", in_size,",  out_size", out_size )
+                # model = GAT( in_size, 256, out_size, heads=[4,4,6]).to( device )
+                model = SAGE( in_feats = in_size, hid_feats = 100, out_feats = out_size ).to( device )
 
                 print( "\n###################" )
                 print( "## MODEL DEFINED ##"   )
                 print( "###################\n" )
+
+#                sampler = dgl.dataloading.MultiLayerFullNeighborSampler(2)
+                # train_dataloader = GraphDataLoader( train_dataset, batch_size=1 )
+                # val_dataloader   = GraphDataLoader( val_dataset,   batch_size=1 )
+                # test_dataloader  = GraphDataLoader( test_dataset,  batch_size=1 )
 
                 train_dataloader = GraphDataLoader( train_dataset, batch_size=1 )
                 val_dataloader   = GraphDataLoader( val_dataset,   batch_size=1 )
