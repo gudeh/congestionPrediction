@@ -75,6 +75,10 @@ def getF1( tp, tn, fp, fn ):
     return f1_score
 
 def getPN( tensor1, tensor2, threshold ):
+    tensor_min = tensor2.min()
+    tensor_max = tensor2.max()
+    tensor2 = ( tensor2 - tensor_min) / (tensor_max - tensor_min)
+    
     mask1 = tensor1 >= threshold
     mask2 = tensor2 >= threshold
     tp = torch.logical_and(mask1, mask2).sum().item()
@@ -288,6 +292,7 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ listFeats ].values )
         self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
 
+
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
         
         #self.graph.ndata[ secondLabel ] = ( torch.from_numpy ( nodes_data[ secondLabel ].to_numpy() ) )
@@ -376,7 +381,7 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     # tensorPredict = predict.to( torch.float32 )
     # tensorLabel = label.to( torch.float32 )
     predict_normalized = ( tensorPredict - tensorPredict.min() ) / ( tensorPredict.max() - tensorPredict.min() )
-    label_normalized   = ( tensorLabel - tensorLabel.min()) / ( tensorLabel.max() - tensorLabel.min() )
+    label_normalized   = tensorLabel #( tensorLabel - tensorLabel.min()) / ( tensorLabel.max() - tensorLabel.min() )
     
     fig, ( ax1, ax2 ) = plt.subplots( 1, 2, figsize = ( 12, 6 ) )
     dummy_image1 = ax1.imshow( [ [ 0, 1 ] ], cmap = 'coolwarm' )
