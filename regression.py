@@ -13,12 +13,12 @@ from pathlib import Path #Reading CSV files
 import math #ceil()
 from random import shuffle #shuffle train/valid/test
 import re # handle type to category names AND_X1
+import time
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter #Graphical visualization
-#from maskedtensor import masked_tensor
 
 import dgl
 from dgl.data import DGLDataset
@@ -54,11 +54,11 @@ rawFeatName = 'type' #TODO: change to listFeats[0]
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-numEpochs = 250
+maxEpochs = 500
 step      = 0.005
 
 
-DEBUG     = 0  ## 0, 1 or 2
+DEBUG     = 2  ## 0, 1 or 2
 CUDA      = True
 DOLEARN   = True
 
@@ -69,22 +69,22 @@ COLAB     = False
 
 
 def getF1( tp, tn, fp, fn ):
-    precision = np.divide(tp, np.add(tp, fp))
-    recall = np.divide(tp, np.add(tp, fn))
-    f1_score = np.multiply(2, np.divide(np.multiply(precision, recall), np.add(precision, recall)))
+    precision = np.divide( tp, np.add( tp, fp ) )
+    recall = np.divide( tp, np.add( tp, fn ) )
+    f1_score = np.multiply( 2, np.divide( np.multiply( precision, recall ), np.add( precision, recall ) ) )
     return f1_score
 
-def getPN( tensor1, tensor2, threshold ):
-    tensor_min = tensor2.min()
-    tensor_max = tensor2.max()
-    tensor2 = ( tensor2 - tensor_min) / (tensor_max - tensor_min)
+def getPN( label, predict, threshold ):
+    tensor_min = predict.min()
+    tensor_max = predict.max()
+    predict = ( predict - tensor_min) / (tensor_max - tensor_min)
     
-    mask1 = tensor1 >= threshold
-    mask2 = tensor2 >= threshold
-    tp = torch.logical_and(mask1, mask2).sum().item()
-    tn = torch.logical_and(~mask1, ~mask2).sum().item()
-    fp = torch.logical_and(~mask1, mask2).sum().item()
-    fn = torch.logical_and(mask1, ~mask2).sum().item()
+    mask1 = label   >= threshold
+    mask2 = predict >= threshold
+    tp = torch.logical_and(  mask1,  mask2 ).sum().item()
+    tn = torch.logical_and( ~mask1, ~mask2 ).sum().item()
+    fp = torch.logical_and( ~mask1,  mask2 ).sum().item()
+    fn = torch.logical_and(  mask1, ~mask2 ).sum().item()
     return tp, tn, fp, fn
 
 nameToHeat  =     {}
@@ -299,7 +299,7 @@ class DataSetFromYosys( DGLDataset ):
 
         print( "---> BEFORE REMOVED NODES:")
         print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
-        print( "\tself.graph.ndata\n", self.graph.ndata )		
+        #print( "\tself.graph.ndata\n", self.graph.ndata )		
 
         self.graph.remove_nodes( idsToRemove )
         # self.drawData = self.drawData.drop( idsToRemove.tolist(), axis=1 )        
@@ -368,21 +368,58 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     # print( "label:", type( label ), label.shape )
     # print( "predict:", type( predict ), predict.shape )
 
-    positions = graph.ndata[ "position" ].to( torch.float32 ).to( "cpu" )
-    # if not torch.equal( graph.ndata[ labelName ].to(device), torch.tensor( label ).to(device) ):
-    if not torch.equal( positions.to(device), tensorLabel ):
-        print( "\n\n\n\n SOMETHING WRONG!!! UNEXPECTED LABELS IN DRAW HEAT \n\n\n" )
-    
-    print( "positions inside draw heat:\n", positions )
-    plt.clf()
-    
-    # tensorPredict = torch.tensor( predict ).to( device )
-    # tensorLabel   = torch.tensor( label ).to( device )
-    # tensorPredict = predict.to( torch.float32 )
-    # tensorLabel = label.to( torch.float32 )
     predict_normalized = ( tensorPredict - tensorPredict.min() ) / ( tensorPredict.max() - tensorPredict.min() )
     label_normalized   = tensorLabel #( tensorLabel - tensorLabel.min()) / ( tensorLabel.max() - tensorLabel.min() )
     
+    plt.close( 'all' )
+    plt.clf()
+################################# ERROR TABLE ########################################################    
+    # residual = ( predict_normalized - label_normalized ).to("cpu")
+    # x, y = torch.meshgrid( label_normalized, predict_normalized )
+    # plt.imshow( residual.unsqueeze(0), cmap = 'coolwarm', origin = 'lower' )
+    # plt.xticks( range( len( label_normalized ) ), label_normalized )
+    # plt.yticks( range( len( predict_normalized ) ), predict_normalized )
+    # plt.xlabel( 'Label' )
+    # plt.ylabel( 'Predict' )
+    # plt.colorbar( label = 'Residual' )
+    # plt.title( 'Residual' )
+
+    ###############
+    # Calculate the residual
+    residual = label_normalized - predict_normalized
+
+    # Convert the tensors to numpy arrays for plotting
+    # label_normalized_np = label_normalized.numpy()
+    # predict_normalized_np = predict_normalized.numpy()
+    residual_np = residual.to("cpu").numpy()
+
+    # Create the plot
+    plt.figure(figsize=(8, 6))
+    # plt.plot(label_normalized_np, label='Normalized Label')
+    # plt.plot(predict_normalized_np, label='Normalized Prediction')
+    # plt.plot(residual_np, label='Residual')
+    #plt.scatter(range(len(residual_np)), residual_np, label='Residual')
+    plt.hist(residual_np, bins=50, edgecolor='black')
+    plt.xlabel('Index')
+    plt.ylabel('Value')
+    plt.title('Residual Plot')
+    #plt.ylim([-1.0, 1.0])  # Set the limits of the y-axis
+    plt.legend()
+    
+    auxName = drawHeatName.replace( "/", "/errorTable/", 1 )
+    print( "auxName:", auxName )
+    plt.savefig( auxName )
+    plt.close( 'all' )
+    plt.clf()
+######################################################################################################
+
+############################# HEATMAPS ###############################################################
+    positions = graph.ndata[ "position" ].to( torch.float32 ).to( "cpu" )
+    # if not torch.equal( graph.ndata[ labelName ].to(device), torch.tensor( label ).to(device) ):
+    if not torch.equal( graph.ndata[ labelName ].to(device).to( torch.float32 ), tensorLabel ):
+        print( "\n\n\n\n SOMETHING WRONG!!! UNEXPECTED LABELS IN DRAW HEAT \n\n\n" )
+        print( "positions.to(device):\n", graph.ndata[ labelName ].to(device).to( torch.float32 ), "\n\ntensorLabel:\n", tensorLabel )
+
     fig, ( ax1, ax2 ) = plt.subplots( 1, 2, figsize = ( 12, 6 ) )
     dummy_image1 = ax1.imshow( [ [ 0, 1 ] ], cmap = 'coolwarm' )
     dummy_image2 = ax2.imshow( [ [ 0, 1 ] ], cmap = 'coolwarm' ) 
@@ -393,40 +430,102 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
         # Add the rectangle patches to the respective plots
         ax1.add_patch( rect1 )
         ax2.add_patch( rect2 )
-    print( "finished rectangles loop" )
 
-    # positionsCPU = positions.cpu()
-    ax1.set_xlim( positions[:, 0].min() - 1, positions[:, 2].max() + 1)
-    ax1.set_ylim( positions[:, 1].min() - 1, positions[:, 3].max() + 1)
+    ax1.set_xlim( positions[ :, 0 ].min() - 1, positions[ :, 2 ].max() + 4)
+    ax1.set_ylim( positions[ :, 1 ].min() - 1, positions[ :, 3 ].max() + 1)
     ax1.set_title( 'Predict' )
     ax1.set_aspect( 'equal' )  # Set aspect ratio to equal for proper rectangle visualization
 
     # Create colorbar for Predict
-    cax1 = fig.add_axes( [ 0.15, 0.1, 0.03, 0.25 ] )  # Define colorbar position
-    mcb.ColorbarBase( cax1, cmap = 'coolwarm', norm=mcolors.Normalize( vmin = predict_normalized.min(), vmax = predict_normalized.max() ), orientation='vertical' )
+    cax1 = fig.add_axes( [ 1, 0, 0.03, 0.25 ] )  # Define colorbar position
+    mcb.ColorbarBase( cax1, cmap = 'coolwarm', norm = mcolors.Normalize( vmin = predict_normalized.min(), vmax = predict_normalized.max() ), orientation = 'vertical' )
     cax1.set_ylabel( 'Prediction' )
 
-    ax2.set_xlim( positions[:, 0].min() - 1, positions[:, 2].max() + 1 )
-    ax2.set_ylim( positions[:, 1].min() - 1, positions[:, 3].max() + 1 )
+    ax2.set_xlim( positions[ :, 0 ].min() - 1, positions[ :, 2 ].max() + 4)
+    ax2.set_ylim( positions[ :, 1 ].min() - 1, positions[ :, 3 ].max() + 1)
     ax2.set_title( 'Label' )
     ax2.set_aspect( 'equal' )  # Set aspect ratio to equal for proper rectangle visualization
 
     # Create colorbar for Tensor Label
-    cax2 = fig.add_axes( [ 0.15, 0.1, 0.03, 0.25 ] )  # Define colorbar position
-    mcb.ColorbarBase( cax2, cmap = 'coolwarm', norm = mcolors.Normalize( vmin = label_normalized.min(), vmax = label_normalized.max() ), orientation='vertical' )
+    cax2 = fig.add_axes( [ 1, 0, 0.03, 0.25 ] )  # Define colorbar position
+    mcb.ColorbarBase( cax2, cmap = 'coolwarm', norm = mcolors.Normalize( vmin = label_normalized.min(), vmax = label_normalized.max() ), orientation = 'vertical' )
     cax2.set_ylabel( 'Label' )
     
-    auxName = drawHeatName.replace( "/", "/new/", 1 )
+    auxName = drawHeatName.replace( "/", "/heatmaps/", 1 )
     print( "auxName:", auxName )
     plt.savefig( auxName )
-    plt.close( fig )
     plt.close( 'all' )
     ax1.clear()
     ax2.clear()
     plt.clf()
 
-    # plt.show()
+######################################################################################################
 
+############################ HISTOGRAMS ##############################################################
+    tensor1 = predict_normalized
+    tensor2 = label_normalized
+
+    # Define the bucket ranges based on minimum and maximum values of the tensors
+    min_value = min(tensor1.min().item(), tensor2.min().item())
+    max_value = max(tensor1.max().item(), tensor2.max().item())
+    bucket_ranges = [min_value,
+                     min_value + (max_value - min_value) / 4,
+                     min_value + (max_value - min_value) / 2,
+                     min_value + (max_value - min_value) * 3 / 4,
+                     max_value]
+
+    # Initialize match count for each bucket to 0
+    match_counts = [0] * len(bucket_ranges)
+    total_counts = len( tensor1 )
+    
+    # Iterate through the values in both tensors and count matches in each bucket
+    for val1, val2 in zip(tensor1, tensor2):
+        for i in range(len(bucket_ranges) - 1):  # Exclude the last bucket range
+            if bucket_ranges[i] <= val1 < bucket_ranges[i+1] and bucket_ranges[i] <= val2 < bucket_ranges[i+1]:
+                match_counts[i] += 1
+
+    # Create a figure with two subplots
+    #fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+    fig, (ax2, ax1, ax3) = plt.subplots(3, 1, sharex=True, gridspec_kw={'height_ratios': [2, 2, 2]})
+
+    # Plot the combined histogram with range values and match counts
+    ax1.hist( [ tensor1.tolist(), tensor2.tolist() ], bins = bucket_ranges, alpha = 0.7, label = [ 'predict', 'label' ] )
+    ax1.set_ylabel( 'Frequency' )
+
+    ax3.set_ylabel( 'Frequency' )
+    # Plot the match counts as text in the combined histogram
+    for i in range(len(bucket_ranges) - 1):  # Exclude the last bucket range
+        bucket_center = ( bucket_ranges[i] + bucket_ranges[ i+1 ] ) / 2
+        width = ( bucket_ranges[i+1] - bucket_ranges[i] ) * 0.8
+        #ax3.text( bucket_center, match_counts[i], str( int( match_counts[i] ) ), ha='center' )
+        ax1.text( bucket_center, match_counts[i], str( int( match_counts[i] ) ), ha='center' )
+
+        ax3.text( bucket_center, match_counts[i], str( round( ( match_counts[i] / total_counts )*100,1 ) ), ha='center' )
+        #ax1.text( bucket_center, match_counts[i], str( round( ( match_counts[i] / total_counts )*100,1 ) ), ha='center' )
+
+        ax3.bar( bucket_center, match_counts[i], width = width, color = 'green' )
+
+    # Plot the individual histograms
+    ax2.hist( tensor1.tolist(), bins = bucket_ranges, alpha=0.7, label='predict')
+    ax2.hist( tensor2.tolist(), bins = bucket_ranges, alpha=0.7, label='label')
+    ax2.set_xlabel('Value')
+    ax2.set_ylabel('Frequency')
+
+    # Add legend to the second subplot
+    ax2.legend()
+
+    # Set title for the figure
+    fig.suptitle('Histogram Comparison')
+
+    # Adjust spacing between subplots
+    plt.tight_layout()
+
+    # Save the figure as an image
+    auxName = drawHeatName.replace("/", "/histogram/", 1)
+    print("auxName:", auxName)
+    plt.savefig(auxName)
+    plt.close('all')
+######################################################################################################
 
     
 
@@ -583,7 +682,7 @@ def evaluate( g, features, labels, model, path, device ):
         if len( path ) > 0:
             print( "\tdrawing output" )
             path = path +"k{:.4f}".format( score_kendall ) + ".png"
-            # drawHeat( list( labels.data.cpu() ), list( predicted.data.cpu() ), path, g )
+            ###### drawHeat( list( labels.data.cpu() ), list( predicted.data.cpu() ), path, g )
             drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
         return score_kendall, score_r2, f1
 
@@ -594,7 +693,7 @@ def evaluate_in_batches( dataloader, device, model ):
     # names = dataloader.dataset.names
     # print("names in evaluate_in_batches:", names )
     for batch_id, batched_graph in enumerate( dataloader ):
-        print( "batch_id:", batch_id )
+        print( "batch_id (eval_in_batches):", batch_id )
         batched_graph = batched_graph.to( device )
         features = batched_graph.ndata[ featName ].float().to( device )
         labels   = batched_graph.ndata[ labelName ].to( device )
@@ -602,7 +701,7 @@ def evaluate_in_batches( dataloader, device, model ):
 #        print("features in evaluate_in_batches:", type(features), features.shape,"\n", features )
 #        print("labels in evaluate_in_batches:", type(labels), labels.shape,"\n", labels )
         score_kendall, score_r2, f1 = evaluate( batched_graph, features, labels, model, "", device )
-        print( "partial Kendall:", score_kendall, ", r2:", score_r2, ", batch_id:", batch_id )
+        print( "partial Kendall (eval_in_batches):", score_kendall, ", r2:", score_r2, ", batch_id:", batch_id )
         total_kendall += score_kendall
         total_r2      += score_r2
         total_f1      += f1
@@ -618,10 +717,11 @@ def evaluate_single( graph, device, model, path ):
     graph = graph.to( device )
     features = graph.ndata[ featName ].float().to( device ) #TODO remove this float and make work.
     labels   = graph.ndata[ labelName ].to( device )
-    print( "evaluate--->", path )                               
+    print( "evaluate single--->", path )                               
     score_kendall, score_r2, f1 = evaluate( graph, features, labels, model, path, device )
     print( "Single graph score - Kendall:", score_kendall, ", r2:", score_r2 )
     return score_kendall, score_r2, f1
+
 
 def train( train_dataloader, val_dataloader, device, model, writerName ):
     print( "device in train:", device )
@@ -634,56 +734,122 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
     loss_fcn = nn.MSELoss()
     optimizer = torch.optim.Adam( model.parameters(), lr = step, weight_decay = 0 )
     
-    # training loop
-    for epoch in range( numEpochs ):
+############## training loop ORIGINAL ################
+#     for epoch in range( maxEpochs ):
+#         model.train()
+#         logits = []
+#         total_loss = 0
+#         for batch_id, batched_graph in enumerate( train_dataloader ):
+#             batched_graph = batched_graph.to(device)
+# #            print( "->batched_graph", type( batched_graph ), batched_graph )
+#             #print("\t%%%% Batch ID ", batch_id )
+#             features = batched_graph.ndata[ featName ].float()
+#             if( features.dim() == 1 ):
+#                 features = features.float().unsqueeze(1)
+#             logits = model( batched_graph, features )
+#             labels = batched_graph.ndata[ labelName ].float()
+#             if( labels.dim() == 1 ): # required if, don't know why shape dont match
+#                 labels = labels.unsqueeze(-1)
+#             loss = loss_fcn( logits, labels )
+#             optimizer.zero_grad()
+#             loss.backward()
+#             optimizer.step()
+#             total_loss += loss.item()
+#         average_loss = total_loss / len(train_dataloader)
+########################################################
+
+################### New loop ###########################
+    best_loss = float('inf')  # Initialize the best training loss with a large value
+    best_val_loss = float('inf')  # Initialize the best validation loss with a large value
+    improvement_threshold = 0.0000001  # Set the threshold for improvement
+    patience = 30  # Number of epochs without improvement to stop training
+
+    epochs_without_improvement = 0  # Counter for epochs without improvement
+    val_epochs_without_improvement = 0  # Counter for validation epochs without improvement
+    
+    for epoch in range( maxEpochs + 1 ):
         model.train()
-        logits = []
         total_loss = 0
-        # mini-batch loop
-        for batch_id, batched_graph in enumerate( train_dataloader ):
+
+        for batch_id, batched_graph in enumerate(train_dataloader):
             batched_graph = batched_graph.to(device)
-#            print( "->batched_graph", type( batched_graph ), batched_graph )
-            #print("\t%%%% Batch ID ", batch_id )
-            features = batched_graph.ndata[ featName ].float()
-#            removedNodesMask = batched_graph.ndata[ 'removedNodesMask' ]
-            if( features.dim() == 1 ):
-#                print("\n\n\nUNSQUEZING\n\n\n")
+            features = batched_graph.ndata[featName].float()
+            if features.dim() == 1:
                 features = features.float().unsqueeze(1)
-            #features = features[ mask ]
-            #print("->features in train:",type(features),features.shape,"\n", features.dtype)
-            #print("\n",features)
-
-            logits = model( batched_graph, features )
-            labels = batched_graph.ndata[ labelName ].float()
-            if( labels.dim() == 1 ): # required if, don't know why shape dont match
+            logits = model(batched_graph, features)
+            labels = batched_graph.ndata[labelName].float()
+            if labels.dim() == 1:
                 labels = labels.unsqueeze(-1)
-
-#            print("->labels in train:",type(labels),labels.shape)
-#            print("\n",labels)
-            loss = loss_fcn( logits, labels )
+            loss = loss_fcn(logits, labels)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
 
-        print("Epoch {:05d} | Loss {:.4f} |". format( epoch, total_loss / (batch_id + 1) ))
+        average_loss = total_loss / len(train_dataloader)
+
+        print("average_loss:", round( average_loss, 5 ), "best_loss:", round( best_loss, 5), "threshold:", improvement_threshold)
+        if average_loss < best_loss - improvement_threshold:
+            best_loss = average_loss
+            epochs_without_improvement = 0  # Reset the counter
+        else:
+            epochs_without_improvement += 1
+
+        # Validation loop
+        model.eval()
+        total_val_loss = 0
+
+        for batch_id, batched_graph in enumerate(val_dataloader):
+            batched_graph = batched_graph.to(device)
+            features = batched_graph.ndata[featName].float()
+            if features.dim() == 1:
+                features = features.float().unsqueeze(1)
+            logits = model(batched_graph, features)
+            labels = batched_graph.ndata[labelName].float()
+            if labels.dim() == 1:
+                labels = labels.unsqueeze(-1)
+            loss = loss_fcn(logits, labels)
+            total_val_loss += loss.item()
+
+        average_val_loss = total_val_loss / len(val_dataloader)
+
+        print( "average_val_loss:", round( average_val_loss, 5 ), "best_val_loss:", round( best_val_loss, 5 ), "threshold:", improvement_threshold )
+        if average_val_loss < best_val_loss - improvement_threshold:
+            best_val_loss = average_val_loss
+            val_epochs_without_improvement = 0  # Reset the counter
+        else:
+            val_epochs_without_improvement += 1
+
+        print("epochs_without_improvement:", epochs_without_improvement, "val_epochs_without_improvement:", val_epochs_without_improvement)
+
+        if epochs_without_improvement >= patience or val_epochs_without_improvement >= patience:
+            print("=======> Early stopping!")
+            break
+        writer.add_scalar( "Loss Valid", average_val_loss, epoch )
+############################################################            
+
+        print("Epoch {:05d} | Loss {:.4f} |". format( epoch, average_loss ) )
+        writer.add_scalar( "Loss Train", average_loss, epoch )
+
+
         if DEBUG == 1:
             if ( epoch + 1 ) % 5 == 0:
-                #kendall, r2 = evaluate_in_batches( val_dataloader, device, model )
+                kendall, r2, f1 = evaluate_in_batches( val_dataloader, device, model )
                 print( "                            Kendall {:.4f} ". format( kendall ) )
                 print( "                            R2      {:.4f} ". format( r2 ) )
                 print( "                            F1      {:.4f} ". format( f1 ) )
-        if DEBUG == 2:
-            writer.add_scalar( "Loss Train", total_loss / (batch_id + 1), epoch )
-            kendall, r2, f1 = evaluate_in_batches( val_dataloader, device, model )
-            writer.add_scalar( "Score TEST Kendall", kendall, epoch )
-            kendall, r2, f1 = evaluate_in_batches( train_dataloader, device, model )
-            writer.add_scalar( "Score TRAIN Kendall", kendall, epoch )
+        # if DEBUG == 2:
+            # kendall, r2, f1 = evaluate_in_batches( val_dataloader, device, model )
+            # writer.add_scalar( "Score TEST Kendall", kendall, epoch )
+            # kendall, r2, f1 = evaluate_in_batches( train_dataloader, device, model )
+            # writer.add_scalar( "Score TRAIN Kendall", kendall, epoch )
     writer.flush()
     writer.close()
+    return epoch
 
 
 if __name__ == '__main__':
+    startTimeAll = time.time()
     print(f'Training Yosys Dataset with DGL built-in GATConv module.')
     
     if CUDA:
@@ -697,11 +863,11 @@ if __name__ == '__main__':
     if os.path.exists( imageOutput ):
         shutil.rmtree( imageOutput )
     os.makedirs( imageOutput )
-    aux = imageOutput + "/columns"
+    aux = imageOutput + "/histogram"
     os.makedirs( aux )
     aux = imageOutput + "/heatmaps"
     os.makedirs( aux )
-    aux = imageOutput + "/new"
+    aux = imageOutput + "/errorTable"
     os.makedirs( aux )
 
     listDir = []	
@@ -754,22 +920,24 @@ if __name__ == '__main__':
         summary = "runSummary.csv"
         with open( summary, 'w' ) as f:
             f.write( "#Circuits:" + str( len( listDir ) ) )
-            f.write( ",epochs:" + str( numEpochs ) )
+            f.write( ",maxEpochs:" + str( maxEpochs ) )
             f.write( ",labelName:" + labelName )
             f.write( ",features:" ) 
             f.write( ";".join( listFeats ) )
-            f.write( "\ni,j,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
+            f.write( "\ni,j,finalEpoch,runtime(min),Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
 	    
         split = [ 0.9, 0.05, 0.05 ]
         #shuffle( listDir )
         # for i in range( 0, len( listDir ) - 1 ):
         #     for j in range( 2, len( listDir ) - 1 ):
-        #         if i == j:
-        #             continue
         #         if j > 2:
         #             continue
-        for i in range( 0, len( listDir ) ):
-            for j in range( 2, 3 ):
+        for i in [ 7 ]: #0-aes, 4-dynamic, 7-swerv
+            # for j in range( 2, 3 ):
+            for j in range( 0, len( listDir ) ):
+                if i == j:
+                    continue
+                startIterationTime = time.time()
                 print( "##################################################################################" )
                 print( "############################# New Run ############################################" )
                 print( "##################################################################################" )
@@ -790,17 +958,8 @@ if __name__ == '__main__':
                 features = train_dataset[0].ndata[ featName ]      
                 if( features.dim() == 1 ):
                     features = features.unsqueeze(1)
-
-                #features = torch.cat( [train_dataset[0].ndata[ featName ][:,None]], dim=1 ) #TODO sometimes shape is unidimension
                 in_size = features.shape[1]
-                print( "features.shape", features.shape )
-
-                #	node_labels = train_dataset[0].ndata[ labelName ].float()
-                #	node_labels[ node_labels == -1 ] = 0
-                #	out_size = int(node_labels.max().item() + 1)
-                #    out_size = train_dataset.num_labels
                 out_size = 1 #TODO parametrize this
-
                 print( "in_size", in_size,",  out_size", out_size )
                 model = GAT( in_size, 256, out_size, heads=[4,4,6] ).to( device )
                 # model = GAT( in_size, 128, out_size, heads=[4,4,6]).to( device )
@@ -842,13 +1001,14 @@ if __name__ == '__main__':
                 print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
 
                 writerName = "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) ) + "-V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
-                train( train_dataloader, test_dataloader, device, model, writerName )
+                finalEpoch = train( train_dataloader, val_dataloader, device, model, writerName )
 
                 print( '######################\n## Final Evaluation ##\n######################\n' )
+                startTimeEval = time.time()
                 for k in range( len( train_dataset ) ):
                     g = train_dataset[k].to( device )
                     path = train_dataset.names[k]
-                    path = imageOutput + "/train-" + path +"-i"+ str(i)+"j"+ str(j)
+                    path = imageOutput + "/train-" + path +"-i"+ str(i)+"j"+ str(j) +"e"+str(finalEpoch)
                     print( "))))))) executing single evaluation on ", path, "-", k )
                     train_kendall, train_r2, train_f1 = evaluate_single( g, device, model, path )
                     print( "Single Train Kendall {:.4f}".format( train_kendall ) )
@@ -857,7 +1017,7 @@ if __name__ == '__main__':
 
                 g = val_dataset[0].to( device )
                 path = val_dataset.names[0]
-                path = imageOutput + "/valid-" + path +"-i"+ str(i)+"j"+ str(j)
+                path = imageOutput + "/valid-" + path +"-i"+ str(i)+"j"+ str(j)+"e"+str(finalEpoch)
                 valid_kendall, valid_r2, valid_f1 = evaluate_single( g, device, model, path )
                 print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
                 print( "Single valid R2 {:.4f}".format( valid_r2 ) )
@@ -865,23 +1025,21 @@ if __name__ == '__main__':
                 
                 g = test_dataset[0].to( device )
                 path = test_dataset.names[0]
-                path = imageOutput + "/test-" + path +"-i"+ str(i)+"j"+ str(j)
+                path = imageOutput + "/test-" + path +"-i"+ str(i)+"j"+ str(j)+"e"+str(finalEpoch)
                 test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
 
                 train_kendall, train_r2, train_f1 = evaluate_in_batches( train_dataloader, device, model )
                 print( "Total Train Kendall {:.4f}".format( train_kendall ) )
                 print( "Total Train R2 {:.4f}".format( train_r2 ) )
                 print( "Total Train f1 {:.4f}".format( train_f1 ) )
-                
-                # test_kendall, test_r2   = evaluate_in_batches( test_dataloader, device, model )
-                # valid_kendall, valid_r2 = evaluate_in_batches( val_dataloader, device, model )
-                # print( "Valid Kendall {:.4f}".format( valid_kendall ) ) #
-                # print( "Test Kendall {:.4f}".format( test_kendall ) )
-                # print( "Valid R2 {:.4f}".format( valid_r2 ) )
-                # print( "Test R2 {:.4f}".format( test_r2 ) )
+
+                print( "\n###############################\n## FinalEvalRuntime:", round( ( time.time() - startTimeEval ) / 60, 1) , "min ##\n###############################\n" )
+
+                iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
+                print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n" )
 
                 with open( summary, 'a' ) as f:
-                    f.write( str(i) + ","+ str(j) +","+ val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
+                    f.write( str(i) + ","+str(j)+","+str(finalEpoch)+","+str( iterationTime )+","+ val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
                     f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() ) )  #+"\n")
                     f.write( "," + str( train_f1.item() ) +","+ str( valid_f1.item() ) +","+ str( test_f1.item() )  +"\n")
                      			
@@ -892,4 +1050,8 @@ if __name__ == '__main__':
                 del train_dataloader
                 del val_dataloader
                 del test_dataloader
+    endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 1 )
+    with open( summary, 'a' ) as f:
+        f.write( ",,," + str( endTimeAll ) + " hours" ) #,,average,=AVERAGE(),=AVERAGE(),=AVERAGE()\n,,,,,median,=MEDIAN(),=MEDIAN(),=MEDIAN()" )
+    print("\n\n All finished, runtime:", endTimeAll, "hours" )
 
