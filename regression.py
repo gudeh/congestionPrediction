@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter #Graphical visualization
+from torch.utils.data import DataLoader, RandomSampler
 
 import dgl
 from dgl.data import DGLDataset
@@ -54,13 +55,16 @@ rawFeatName = 'type' #TODO: change to listFeats[0]
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 500
+maxEpochs = 250
+useEarlyStop = False
 step      = 0.005
+accumulation_steps = 4
 
 
-DEBUG     = 2  ## 0, 1 or 2
+DEBUG     = 0 #1 for evaluation inside train
 CUDA      = True
 DOLEARN   = True
+skipFinalEval = False #TODO True
 
 
 SELF_LOOP = True
@@ -360,20 +364,38 @@ def drawGraph( graph, graphName ):
 #    print("len graph.ndata:",len(graph.ndata))
 #    print("type graph.ndata:",type(graph.ndata))
 
-
 def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     designName = graph.name
     print( "************* INDSIDE DRAWHEAT *****************" )
     print( "Circuit:", designName )
-    # print( "label:", type( label ), label.shape )
-    # print( "predict:", type( predict ), predict.shape )
+    print( "label:", type( tensorLabel ), tensorLabel.shape )
+    print( "predict:", type( tensorPredict ), tensorPredict.shape )
 
     predict_normalized = ( tensorPredict - tensorPredict.min() ) / ( tensorPredict.max() - tensorPredict.min() )
     label_normalized   = tensorLabel #( tensorLabel - tensorLabel.min()) / ( tensorLabel.max() - tensorLabel.min() )
     
     plt.close( 'all' )
     plt.clf()
-################################# ERROR TABLE ########################################################    
+
+################################# VALUES PLOT ########################################################
+    types = graph.ndata[ featName ].to( torch.float32 ).to( "cpu" )
+    predict_aux = predict_normalized[:10000].to( "cpu" )
+    label_aux   = label_normalized  [:10000].to( "cpu" )
+    plt.scatter(range(len(predict_aux ) ), predict_aux, color='blue', label='Predict')
+    plt.scatter(range(len(label_aux ) ), label_aux, color='red', label='Label')
+    plt.xlabel('Index')
+    plt.ylabel('Value')
+    plt.title('Predicted vs. Labeled Values')
+    plt.legend()
+    
+    auxName = drawHeatName.replace( "/", "/valuesPlot/", 1 )
+    print( "auxName:", auxName )
+    plt.savefig( auxName )
+    plt.close( 'all' )
+    plt.clf()
+######################################################################################################
+    
+################################# RESIDUAL ########################################################    
     # residual = ( predict_normalized - label_normalized ).to("cpu")
     # x, y = torch.meshgrid( label_normalized, predict_normalized )
     # plt.imshow( residual.unsqueeze(0), cmap = 'coolwarm', origin = 'lower' )
@@ -385,26 +407,17 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     # plt.title( 'Residual' )
 
     ###############
-    # Calculate the residual
     residual = label_normalized - predict_normalized
-
-    # Convert the tensors to numpy arrays for plotting
-    # label_normalized_np = label_normalized.numpy()
-    # predict_normalized_np = predict_normalized.numpy()
     residual_np = residual.to("cpu").numpy()
-
-    # Create the plot
-    plt.figure(figsize=(8, 6))
-    # plt.plot(label_normalized_np, label='Normalized Label')
-    # plt.plot(predict_normalized_np, label='Normalized Prediction')
-    # plt.plot(residual_np, label='Residual')
-    #plt.scatter(range(len(residual_np)), residual_np, label='Residual')
-    plt.hist(residual_np, bins=50, edgecolor='black')
-    plt.xlabel('Index')
-    plt.ylabel('Value')
-    plt.title('Residual Plot')
-    #plt.ylim([-1.0, 1.0])  # Set the limits of the y-axis
-    plt.legend()
+    residual_np = residual_np[~np.isnan(residual_np)]
+    if residual_np.size > 0:  # Check if the filtered array is not empty
+        plt.figure(figsize=(8, 6))
+        plt.hist(residual_np, bins=50, edgecolor='black')
+        plt.xlabel('Index')
+        plt.ylabel('Value')
+        plt.title('Residual Plot')
+        plt.xlim( -1, 1 )
+        plt.legend()
     
     auxName = drawHeatName.replace( "/", "/errorTable/", 1 )
     print( "auxName:", auxName )
@@ -614,47 +627,27 @@ class SAGE( nn.Module ):
         return h
 	
 
-class GAT( nn.Module ):
-    def __init__( self, in_size, hid_size, out_size, heads ):
+class GAT(nn.Module):
+    def __init__(self, in_size, hid_size, out_size, heads):
         super().__init__()
+#        heads = [4,4,6,6,6]
         self.gatLayers = nn.ModuleList()
-        # three-layer GAT
-        #		self.gatLayers.append(dglnn.GATConv(in_size, hid_size, heads[0], activation=F.elu))
-        #		self.gatLayers.append(dglnn.GATConv(hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu))
-        #		self.gatLayers.append(dglnn.GATConv(hid_size*heads[1], out_size, heads[2], residual=True, activation=None))
-        print( "\n\nINIT GAT!!" )
-        print( "in_size:", in_size )
-        print( "hid_size:", hid_size ) 
-        for k,head in enumerate( heads ):
-            print( "head:", k,head )
-        print( "out_size", out_size )
-        # if SELF_LOOP:
-        #     self.gatLayers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu )) #, allow_zero_in_degree=True ) )
-        #     self.gatLayers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu )) #, allow_zero_in_degree=True ) )
-        #     self.gatLayers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None )) #, allow_zero_in_degree=True ) )
-        # else:
-        #     self.gatLayers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation=F.elu, allow_zero_in_degree=True ) )
-        #     self.gatLayers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation=F.elu, allow_zero_in_degree=True ) )
-        #     self.gatLayers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None, allow_zero_in_degree=True ) )
-        self.gatLayers.append( dglnn.GATConv( in_size, hid_size, heads[0], activation = F.relu, allow_zero_in_degree = not SELF_LOOP ))# , feat_drop = 0.05, attn_drop = 0.05 ) )
-        self.gatLayers.append( dglnn.GATConv( hid_size*heads[0], hid_size, heads[1], residual=True, activation = F.relu, allow_zero_in_degree = not SELF_LOOP )) #, feat_drop = 0.5, attn_drop = 0.5 ) )
-        # self.gatLayers.append( dglnn.GATConv( hid_size*heads[1], hid_size, heads[1], residual=True, activation=F.relu, allow_zero_in_degree = not SELF_LOOP ) )
-        self.gatLayers.append( dglnn.GATConv( hid_size*heads[1], out_size, heads[2], residual=True, activation=None, allow_zero_in_degree = not SELF_LOOP ) )
+        self.gatLayers.append(dglnn.GATConv(in_size, hid_size, heads[0], activation=F.relu, allow_zero_in_degree=not SELF_LOOP))
+        self.gatLayers.append(dglnn.GATConv(hid_size * heads[0], hid_size, heads[1], residual=True, activation=F.relu, allow_zero_in_degree=not SELF_LOOP))
+        self.gatLayers.append(dglnn.GATConv(hid_size * heads[1], out_size, heads[2], residual=True, activation=None, allow_zero_in_degree=not SELF_LOOP))
+#        self.gatLayers.append(dglnn.GATConv(hid_size * heads[2], out_size, heads[3], residual=True, activation=F.relu, allow_zero_in_degree=not SELF_LOOP))
+#        self.gatLayers.append(dglnn.GATConv(hid_size * heads[3], out_size, heads[4], residual=True, activation=None, allow_zero_in_degree=not SELF_LOOP))
         
-    def forward( self, g, inputs ):
+    def forward(self, g, inputs):
         h = inputs
-        for i, layer in enumerate( self.gatLayers ):
-            h = layer( g, h )
-            if i == 2:  # TODO: change this to parametrizable 
+        for i, layer in enumerate(self.gatLayers):
+            h = layer(g, h)
+            if i == len(self.gatLayers) - 1:  # Apply mean pooling to the last layer
                 h = h.mean(1)
-            else:       # other layer(s)
+            else:
                 h = h.flatten(1)
         return h
-    # def forward( self, g, h ):
-    #     for conv in self.gatLayers[ :-1 ]:
-    #         h = conv( g, h ).relu()
-    #     h = self.gatLayers[ -1 ]( g, h )
-    #     return h
+
 
  
 def evaluate( g, features, labels, model, path, device ):
@@ -676,6 +669,7 @@ def evaluate( g, features, labels, model, path, device ):
         score_r2 = r2_score( labels.data.cpu(), predicted.data.cpu() )
         kendall = KendallRankCorrCoef( variant = 'a' ).to( device )
         print( "calculating kendal..." )
+        # score_kendall = kendall( predicted + 0.1, labels )
         score_kendall = kendall( predicted, labels )
         print( "Kendall calculated" )
         #print("score_kendall:", type( score_kendall ), str( score_kendall ), "\n", score_kendall,"\n\n")
@@ -683,7 +677,7 @@ def evaluate( g, features, labels, model, path, device ):
             print( "\tdrawing output" )
             path = path +"k{:.4f}".format( score_kendall ) + ".png"
             ###### drawHeat( list( labels.data.cpu() ), list( predicted.data.cpu() ), path, g )
-            drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
+            #drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
         return score_kendall, score_r2, f1
 
 def evaluate_in_batches( dataloader, device, model ):
@@ -715,7 +709,7 @@ def evaluate_single( graph, device, model, path ):
     total_kendall = 0.0
     total_r2      = 0.0
     graph = graph.to( device )
-    features = graph.ndata[ featName ].float().to( device ) #TODO remove this float and make work.
+    features = graph.ndata[ featName ].float().to( device )
     labels   = graph.ndata[ labelName ].to( device )
     print( "evaluate single--->", path )                               
     score_kendall, score_r2, f1 = evaluate( graph, features, labels, model, path, device )
@@ -726,6 +720,12 @@ def evaluate_single( graph, device, model, path ):
 def train( train_dataloader, val_dataloader, device, model, writerName ):
     print( "device in train:", device )
     writer = SummaryWriter( comment = writerName )
+
+    # torch.cuda.reset_peak_memory_stats()
+    # torch.cuda.memory_stats(enable=True)
+    torch.cuda.reset_max_memory_allocated()
+    accumulated_memory_usage = 0
+    max_memory_usage = 0
     
     #loss_fcn = nn.BCEWithLogitsLoss()
 #    loss_fcn = nn.CrossEntropyLoss()
@@ -758,10 +758,10 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
 #         average_loss = total_loss / len(train_dataloader)
 ########################################################
 
-################### New loop ###########################
+################### Early Stop loop ###########################
     best_loss = float('inf')  # Initialize the best training loss with a large value
     best_val_loss = float('inf')  # Initialize the best validation loss with a large value
-    improvement_threshold = 0.0000001  # Set the threshold for improvement
+    improvement_threshold = 0.000001  # Set the threshold for improvement
     patience = 30  # Number of epochs without improvement to stop training
 
     epochs_without_improvement = 0  # Counter for epochs without improvement
@@ -769,7 +769,8 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
     
     for epoch in range( maxEpochs + 1 ):
         model.train()
-        total_loss = 0
+        total_loss = 0.0
+        accumulated_loss = 0.0
 
         for batch_id, batched_graph in enumerate(train_dataloader):
             batched_graph = batched_graph.to(device)
@@ -781,24 +782,36 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
             if labels.dim() == 1:
                 labels = labels.unsqueeze(-1)
             loss = loss_fcn(logits, labels)
+
+################# Without accumulate #################################
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
-
+################# Accumulate gradients ################################
+            # accumulated_loss += loss
+            # if (batch_id + 1) % accumulation_steps == 0:
+            #     accumulated_loss.backward()
+            #     optimizer.step()
+            #     optimizer.zero_grad()
+            #     total_loss += accumulated_loss.item()
+            #     accumulated_loss = 0.0
+#####################################################################
+            memory_usage = torch.cuda.memory_allocated() / (1024.0 * 1024.0)
+            max_memory_usage = max( max_memory_usage, memory_usage )
+            accumulated_memory_usage += memory_usage
+            
         average_loss = total_loss / len(train_dataloader)
-
-        print("average_loss:", round( average_loss, 5 ), "best_loss:", round( best_loss, 5), "threshold:", improvement_threshold)
+        accumulated_memory_usage = accumulated_memory_usage / len(train_dataloader)
         if average_loss < best_loss - improvement_threshold:
             best_loss = average_loss
             epochs_without_improvement = 0  # Reset the counter
         else:
             epochs_without_improvement += 1
 
-        # Validation loop
+        ###### Validation loop #######
         model.eval()
         total_val_loss = 0
-
         for batch_id, batched_graph in enumerate(val_dataloader):
             batched_graph = batched_graph.to(device)
             features = batched_graph.ndata[featName].float()
@@ -812,26 +825,26 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
             total_val_loss += loss.item()
 
         average_val_loss = total_val_loss / len(val_dataloader)
-
-        print( "average_val_loss:", round( average_val_loss, 5 ), "best_val_loss:", round( best_val_loss, 5 ), "threshold:", improvement_threshold )
         if average_val_loss < best_val_loss - improvement_threshold:
             best_val_loss = average_val_loss
             val_epochs_without_improvement = 0  # Reset the counter
         else:
             val_epochs_without_improvement += 1
-
-        print("epochs_without_improvement:", epochs_without_improvement, "val_epochs_without_improvement:", val_epochs_without_improvement)
-
-        if epochs_without_improvement >= patience or val_epochs_without_improvement >= patience:
+        if useEarlyStop and (epochs_without_improvement >= patience or val_epochs_without_improvement >= patience):
             print("=======> Early stopping!")
             break
+
+        #print( "Epoch {:05d} | Loss {:.4f} |". format( epoch, average_loss ), flush = True )
+        #print( "average_loss:", round( average_loss, 5 ), "best_loss:", round( best_loss, 5 ) )
+        #print( "average_val_loss:", round( average_val_loss, 5 ), "best_val_loss:", round( best_val_loss, 5 ) )
+        print( "Epoch {:05d} | Train Loss {:.4f} | Valid Loss {:.4f} | ". format( epoch, average_loss, average_val_loss ), flush = True, end="" )
+        print( "best_loss:", round( best_loss, 5 ), " | best_val_loss:", round( best_val_loss, 5 ), end=" | " )
+        print( "epochs_without_improvement:", epochs_without_improvement, "val_without_improvement:", val_epochs_without_improvement )
+        print(f"Epoch: {epoch+1}, Max Memory Usage (MB): {max_memory_usage}, Accumulated Memory Usage (MB): {accumulated_memory_usage}", flush=True)
+        torch.cuda.reset_max_memory_allocated()
+        
         writer.add_scalar( "Loss Valid", average_val_loss, epoch )
-############################################################            
-
-        print("Epoch {:05d} | Loss {:.4f} |". format( epoch, average_loss ) )
         writer.add_scalar( "Loss Train", average_loss, epoch )
-
-
         if DEBUG == 1:
             if ( epoch + 1 ) % 5 == 0:
                 kendall, r2, f1 = evaluate_in_batches( val_dataloader, device, model )
@@ -845,7 +858,8 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
             # writer.add_scalar( "Score TRAIN Kendall", kendall, epoch )
     writer.flush()
     writer.close()
-    return epoch
+    torch.cuda.empty_cache()
+    return epoch, max_memory_usage, accumulated_memory_usage
 
 
 if __name__ == '__main__':
@@ -868,6 +882,8 @@ if __name__ == '__main__':
     aux = imageOutput + "/heatmaps"
     os.makedirs( aux )
     aux = imageOutput + "/errorTable"
+    os.makedirs( aux )
+    aux = imageOutput + "/valuesPlot"
     os.makedirs( aux )
 
     listDir = []	
@@ -924,7 +940,7 @@ if __name__ == '__main__':
             f.write( ",labelName:" + labelName )
             f.write( ",features:" ) 
             f.write( ";".join( listFeats ) )
-            f.write( "\ni,j,finalEpoch,runtime(min),Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
+            f.write( "\ni,j,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
 	    
         split = [ 0.9, 0.05, 0.05 ]
         #shuffle( listDir )
@@ -963,7 +979,7 @@ if __name__ == '__main__':
                 print( "in_size", in_size,",  out_size", out_size )
                 model = GAT( in_size, 256, out_size, heads=[4,4,6] ).to( device )
                 # model = GAT( in_size, 128, out_size, heads=[4,4,6]).to( device )
-                # model = SAGE( in_feats = in_size, hid_feats = 125, out_feats = out_size ).to( device )
+                # model = SAGE( in_feats = in_size, hid_feats = 125, out_feats  = out_size ).to( device )
 
                 print( "\n###################" )
                 print( "## MODEL DEFINED ##"   )
@@ -974,13 +990,24 @@ if __name__ == '__main__':
                 #     g = train_dataset[k].to( device )
                 #     train_dataloader = DataLoader( g, g.nodes, graph_sampler = sampler, batch_size=1, use_uva = True, device = device )
                 # val_dataloader   = DataLoader( val_dataset,   batch_size=1 )
-                # test_dataloader  = DataLoader( test_dataset,  batch_size=1 )
+                # test_dataloader  = DataLoader( test_dataset,  batch_size=1 ) 
 
-                train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )
+                # Create the samplers
+                # train_sampler = RandomSampler(train_dataset)  # Randomly sample from the training dataset
+                #sampler = NeighborSampler( g, [10,5,4], shuffle=True, num_workers=4)
+
+                val_sampler = torch.utils.data.SequentialSampler(val_dataset)  # Iterate through the validation dataset sequentially
+                test_sampler = torch.utils.data.SequentialSampler(test_dataset)  # Iterate through the test dataset sequentially
+
+
+                train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )#5 , sampler = train_sampler )
                 val_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
                 test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
+                # train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )
+                # val_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
+                # test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
 
-                print( "len( train_dataloader ):", len( train_dataloader ) )
+                print( "len( train_dataloader ) number of batches:", len( train_dataloader ) )
                 print( "\n###################"   )
                 print( "### SPLIT INFO ####"   )
                 print( "###################"   )
@@ -1001,45 +1028,48 @@ if __name__ == '__main__':
                 print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
 
                 writerName = "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) ) + "-V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
-                finalEpoch = train( train_dataloader, val_dataloader, device, model, writerName )
+                finalEpoch, maxMem, accMem = train( train_dataloader, val_dataloader, device, model, writerName )
+                finalEpoch += 1
 
                 print( '######################\n## Final Evaluation ##\n######################\n' )
                 startTimeEval = time.time()
-                for k in range( len( train_dataset ) ):
-                    g = train_dataset[k].to( device )
-                    path = train_dataset.names[k]
-                    path = imageOutput + "/train-" + path +"-i"+ str(i)+"j"+ str(j) +"e"+str(finalEpoch)
-                    print( "))))))) executing single evaluation on ", path, "-", k )
-                    train_kendall, train_r2, train_f1 = evaluate_single( g, device, model, path )
-                    print( "Single Train Kendall {:.4f}".format( train_kendall ) )
-                    print( "Single Train R2 {:.4f}".format( train_r2 ) )
-                    print( "Single Train f1 {:.4f}".format( train_f1 ) )
+                if not skipFinalEval:
+                    for k in range( len( train_dataset ) ):
+                        g = train_dataset[k].to( device )
+                        path = train_dataset.names[k]
+                        path = imageOutput + "/train-" + path +"-i"+ str(i)+"j"+ str(j) +"e"+str(finalEpoch)
+                        print( "))))))) executing single evaluation on ", path, "-", k )
+                        train_kendall, train_r2, train_f1 = evaluate_single( g, device, model, path )
+                        print( "Single Train Kendall {:.4f}".format( train_kendall ) )
+                        print( "Single Train R2 {:.4f}".format( train_r2 ) )
+                        print( "Single Train f1 {:.4f}".format( train_f1 ) )
 
-                g = val_dataset[0].to( device )
-                path = val_dataset.names[0]
-                path = imageOutput + "/valid-" + path +"-i"+ str(i)+"j"+ str(j)+"e"+str(finalEpoch)
-                valid_kendall, valid_r2, valid_f1 = evaluate_single( g, device, model, path )
-                print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
-                print( "Single valid R2 {:.4f}".format( valid_r2 ) )
-                print( "Single valid f1 {:.4f}".format( valid_f1 ) )
-                
-                g = test_dataset[0].to( device )
-                path = test_dataset.names[0]
-                path = imageOutput + "/test-" + path +"-i"+ str(i)+"j"+ str(j)+"e"+str(finalEpoch)
-                test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
+                    g = val_dataset[0].to( device )
+                    path = val_dataset.names[0]
+                    path = imageOutput + "/valid-" + path +"-i"+ str(i)+"j"+ str(j)+"e"+str(finalEpoch)
+                    valid_kendall, valid_r2, valid_f1 = evaluate_single( g, device, model, path )
+                    print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
+                    print( "Single valid R2 {:.4f}".format( valid_r2 ) )
+                    print( "Single valid f1 {:.4f}".format( valid_f1 ) )
 
-                train_kendall, train_r2, train_f1 = evaluate_in_batches( train_dataloader, device, model )
-                print( "Total Train Kendall {:.4f}".format( train_kendall ) )
-                print( "Total Train R2 {:.4f}".format( train_r2 ) )
-                print( "Total Train f1 {:.4f}".format( train_f1 ) )
+                    g = test_dataset[0].to( device )
+                    path = test_dataset.names[0]
+                    path = imageOutput + "/test-" + path +"-i"+ str(i)+"j"+ str(j)+"e"+str(finalEpoch)
+                    test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
 
+                    train_kendall, train_r2, train_f1 = evaluate_in_batches( train_dataloader, device, model )
+                    print( "Total Train Kendall {:.4f}".format( train_kendall ) )
+                    print( "Total Train R2 {:.4f}".format( train_r2 ) )
+                    print( "Total Train f1 {:.4f}".format( train_f1 ) )
+
+                else:
+                    test_kendall= test_r2= test_f1= train_kendall= train_r2= train_f1=0.0
                 print( "\n###############################\n## FinalEvalRuntime:", round( ( time.time() - startTimeEval ) / 60, 1) , "min ##\n###############################\n" )
-
                 iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
                 print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n" )
 
                 with open( summary, 'a' ) as f:
-                    f.write( str(i) + ","+str(j)+","+str(finalEpoch)+","+str( iterationTime )+","+ val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
+                    f.write( str(i) + ","+str(j)+","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( accMem/finalEpoch )+","+ val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
                     f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() ) )  #+"\n")
                     f.write( "," + str( train_f1.item() ) +","+ str( valid_f1.item() ) +","+ str( test_f1.item() )  +"\n")
                      			
