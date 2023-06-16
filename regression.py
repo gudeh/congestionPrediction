@@ -63,7 +63,7 @@ accumulation_steps = 4
 
 
 DEBUG         = 0 #1 for evaluation inside train
-DRAWOUTPUT    = False
+DRAWOUTPUTS   = False
 CUDA          = True
 DOLEARN       = True
 skipFinalEval = False #TODO True
