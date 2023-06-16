@@ -62,9 +62,10 @@ step      = 0.005
 accumulation_steps = 4
 
 
-DEBUG     = 0 #1 for evaluation inside train
-CUDA      = True
-DOLEARN   = True
+DEBUG         = 0 #1 for evaluation inside train
+DRAWOUTPUT    = False
+CUDA          = True
+DOLEARN       = True
 skipFinalEval = False #TODO True
 
 
@@ -704,7 +705,8 @@ def evaluate( g, features, labels, model, path, device ):
             print( "\tdrawing output" )
             path = path +"k{:.4f}".format( score_kendall ) + ".png"
             ###### drawHeat( list( labels.data.cpu() ), list( predicted.data.cpu() ), path, g )
-            #drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
+            if DRAWOUTPUTS:
+                drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
         return score_kendall, score_r2, f1
 
 def evaluate_in_batches( dataloader, device, model ):
