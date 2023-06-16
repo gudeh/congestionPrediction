@@ -14,6 +14,7 @@ import math #ceil()
 from random import shuffle #shuffle train/valid/test
 import re # handle type to category names AND_X1
 import time
+from itertools import combinations # ablation to test multiple features
 
 import torch
 import torch.nn as nn
@@ -55,7 +56,7 @@ rawFeatName = 'type' #TODO: change to listFeats[0]
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 250
+maxEpochs = 0
 useEarlyStop = False
 step      = 0.005
 accumulation_steps = 4
@@ -120,11 +121,11 @@ def preProcessData( listDir ):
                             nameToCategory[ match.group( 1 ) ] =  len( nameToCategory ) + 1
                             #typeTo2Categories[ cellType ] = [ nameToCategory[ match.group( 0 ) ], match.group( 1 ) ]
                         if cellType not in typeToNameCat:
-                            if len( listFeats ) == 2:
-                                typeToNameCat[ cellType ] = nameToCategory[ match.group( 1 ) ]
-                                typeToSize[ cellType ]    = int( match.group( 2 ) )
-                            else:
-                                typeToNameCat[ cellType ] = len( typeToNameCat )
+                            # if len( listFeats ) == 2:
+                            #     typeToNameCat[ cellType ] = nameToCategory[ match.group( 1 ) ]
+                            #     typeToSize[ cellType ]    = int( match.group( 2 ) )
+                            # else:
+                            typeToNameCat[ cellType ] = len( typeToNameCat )
                 else:
                     print( "WARNING: Unexpected cell type:", cellType )    
                     typeToNameCat[ cellType ] = -1
@@ -214,7 +215,7 @@ def writeDFrameData( listDir, csvName, outName ):
 
 
 class DataSetFromYosys( DGLDataset ):  
-    def __init__( self, listDir, split, mode='train' ):    
+    def __init__( self, listDir, split, ablationFeatures, mode='train' ):    
         if len( split ) != 3 or sum( split ) != 1.0:
 	        print("!!!!ERROR: fatal, unexpected split sizes." )
 	        return
@@ -276,8 +277,13 @@ class DataSetFromYosys( DGLDataset ):
         nodes_data = pd.merge( nodes_data, positions, on = "name" )
         print( "AFTER MERGE nodes_data:", nodes_data.shape, "\n", nodes_data )
         
-        df = nodes_data[ listFeats + [ labelName ] ]
-        df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] > 0, True, False ) ) # trying to remove also 0 heat
+        # df = nodes_data[ listFeats + [ labelName ] ]
+        print( "ablationFeatures:", type( ablationFeatures ), "\n", ablationFeatures )
+        df = nodes_data[ ablationFeatures + [ labelName ] ]
+        if rawFeatName in ablationFeatures:
+            df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] > 0, True, False ) )
+        else:
+            df_wanted = np.logical_and (  np.where( df[ labelName ] > 0, True, False ) )
         df_wanted = np.invert( df_wanted )
     #		print( "df_wanted:", df_wanted.shape, "\n", df_wanted )
         removedNodesMask = torch.tensor( df_wanted )
@@ -293,7 +299,8 @@ class DataSetFromYosys( DGLDataset ):
                           
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
         self.graph.name = str( designPath ).rsplit( '/' )[-1]
-        self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ listFeats ].values )
+        # self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ listFeats ].values )
+        self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ ablationFeatures ].values )
         self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
 
 
@@ -320,6 +327,26 @@ class DataSetFromYosys( DGLDataset ):
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
         #		print( "\tself.graph.ndata\n", self.graph.ndata )
         # print( "DRAW DATA:\n", self.drawData )
+
+        if 'pagerank' in ablationFeatures:
+            #        import cugraph
+            print("nx_graph",flush=True)
+            nx_graph = self.graph.to_networkx()
+            # Compute the centrality measures
+            pagerank_scores = nx.pagerank(nx_graph)
+            print("page_rank done",flush=True)
+            #betweenness_scores = nx.betweenness_centrality(nx_graph)
+            print("betweenness done",flush=True)
+
+            # cu_graph = cugraph.from_dgl_graph(self.graph.to("cuda"))
+            # pr_scores = cugraph.pagerank(cu_graph)
+            # betweenness_scores = cugraph.betweenness_centrality(cu_graph)
+
+            pagerank_scores_list = list(pagerank_scores.values())
+            pagerank_tensor = torch.tensor(pagerank_scores_list)
+            self.graph.ndata[listFeats[1]] = pagerank_tensor
+            # self.graph.ndata[ listFeats[1] ] = [pagerank_scores[node] for node in range(self.graph.number_of_nodes())]
+            #self.graph.ndata[ listFeats[2] ] = [betweenness_scores[node] for node in range(self.graph.number_of_nodes())]
 
         return self.graph
            
@@ -932,154 +959,158 @@ if __name__ == '__main__':
     ##################################################################################
 
 
-    if DOLEARN:
-        summary = "runSummary.csv"
-        with open( summary, 'w' ) as f:
-            f.write( "#Circuits:" + str( len( listDir ) ) )
-            f.write( ",maxEpochs:" + str( maxEpochs ) )
-            f.write( ",labelName:" + labelName )
-            f.write( ",features:" ) 
-            f.write( ";".join( listFeats ) )
-            f.write( "\ni,j,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
-	    
-        split = [ 0.9, 0.05, 0.05 ]
-        #shuffle( listDir )
-        # for i in range( 0, len( listDir ) - 1 ):
-        #     for j in range( 2, len( listDir ) - 1 ):
-        #         if j > 2:
-        #             continue
-        for i in [ 7 ]: #0-aes, 4-dynamic, 7-swerv
-            # for j in range( 2, 3 ):
-            for j in range( 0, len( listDir ) ):
-                if i == j:
-                    continue
-                startIterationTime = time.time()
-                print( "##################################################################################" )
-                print( "############################# New Run ############################################" )
-                print( "##################################################################################" )
-                currentDir = listDir.copy()
+    if not DOLEARN:
+        sys.exit()
+    summary = "runSummary.csv"
+    with open( summary, 'w' ) as f:
+        f.write( "#Circuits:" + str( len( listDir ) ) )
+        f.write( ",maxEpochs:" + str( maxEpochs ) )
+        f.write( ",labelName:" + labelName )
+        f.write( ",features:" ) 
+        f.write( ";".join( listFeats ) )
+        f.write( "\ntestIndex,validIndex,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
 
-                auxString = currentDir[ -1 ]
-                currentDir[ -1 ] = currentDir[ i ]
-                currentDir[ i ] = auxString
-
-                auxString = currentDir[ -2 ]
-                currentDir[ -2 ] = currentDir[ j ]
-                currentDir[ j ] = auxString
-
-                train_dataset = DataSetFromYosys( currentDir, split, mode='train' )
-                val_dataset   = DataSetFromYosys( currentDir, split, mode='valid' )
-                test_dataset  = DataSetFromYosys( currentDir, split, mode='test'  )
-
-                features = train_dataset[0].ndata[ featName ]      
-                if( features.dim() == 1 ):
-                    features = features.unsqueeze(1)
-                in_size = features.shape[1]
-                out_size = 1 #TODO parametrize this
-                print( "in_size", in_size,",  out_size", out_size )
-                model = GAT( in_size, 256, out_size, heads=[4,4,6] ).to( device )
-                # model = GAT( in_size, 128, out_size, heads=[4,4,6]).to( device )
-                # model = SAGE( in_feats = in_size, hid_feats = 125, out_feats  = out_size ).to( device )
-
-                print( "\n###################" )
-                print( "## MODEL DEFINED ##"   )
-                print( "###################\n" )
-
-                # sampler = dgl.dataloading.MultiLayerFullNeighborSampler(2)
-                # for k in range( len( train_dataset ) ):
-                #     g = train_dataset[k].to( device )
-                #     train_dataloader = DataLoader( g, g.nodes, graph_sampler = sampler, batch_size=1, use_uva = True, device = device )
-                # val_dataloader   = DataLoader( val_dataset,   batch_size=1 )
-                # test_dataloader  = DataLoader( test_dataset,  batch_size=1 ) 
-
-                # Create the samplers
-                # train_sampler = RandomSampler(train_dataset)  # Randomly sample from the training dataset
-                #sampler = NeighborSampler( g, [10,5,4], shuffle=True, num_workers=4)
-
-                val_sampler = torch.utils.data.SequentialSampler(val_dataset)  # Iterate through the validation dataset sequentially
-                test_sampler = torch.utils.data.SequentialSampler(test_dataset)  # Iterate through the test dataset sequentially
+    split = [ 0.9, 0.05, 0.05 ]
+    print( ">>>>>> listDir:" )
+    for index in range(len(listDir)):
+        print("\tIndex:", index, "- Path:", listDir[index])
 
 
-                train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )#5 , sampler = train_sampler )
-                val_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
-                test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
-                # train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )
-                # val_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
-                # test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
+    for combAux in range( 1, len( listFeats ) + 1 ):
+        combinations_list = list( combinations( listFeats, combAux ) )
+        for ablationFeatures in combinations_list:
+            ablationFeatures = list( ablationFeatures )
+            for testIndex in [ 7 ]: #0-aes, 4-dynamic, 7-swerv
+                for validIndex in range( len( listDir ) ):
+                    if testIndex == validIndex:
+                        continue
+                    startIterationTime = time.time()
+                    print( "##################################################################################" )
+                    print( "############################# New Run ############################################" )
+                    print( "##################################################################################" )
+                    currentDir = listDir.copy()
 
-                print( "len( train_dataloader ) number of batches:", len( train_dataloader ) )
-                print( "\n###################"   )
-                print( "### SPLIT INFO ####"   )
-                print( "###################"   )
-                
-                train_dataset.printDataset()    
-                val_dataset.printDataset()    
-                test_dataset.printDataset()
-                
-                print( "->original:   ", end="" )
-                for item in listDir:
-                    print( str( item ).rsplit( '/' )[-1], end=", " )
-                print( "\n" )
-                print( "->currentDir: ", end="" )
-                for item in currentDir:
-                    print( str( item ).rsplit( '/' )[-1], end=", " )
-                print( "\n" )
-                print( "i:", i, "j:", j )
-                print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
+                    auxString = currentDir[ -1 ]
+                    currentDir[ -1 ] = currentDir[ testIndex ]
+                    currentDir[ testIndex ] = auxString
 
-                writerName = "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) ) + "-V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
-                finalEpoch, maxMem, accMem = train( train_dataloader, val_dataloader, device, model, writerName )
-                finalEpoch += 1
+                    auxString = currentDir[ -2 ]
+                    currentDir[ -2 ] = currentDir[ validIndex]
+                    currentDir[ validIndex] = auxString
 
-                print( '######################\n## Final Evaluation ##\n######################\n' )
-                startTimeEval = time.time()
-                if not skipFinalEval:
-                    for k in range( len( train_dataset ) ):
-                        g = train_dataset[k].to( device )
-                        path = train_dataset.names[k]
-                        path = imageOutput + "/train-" + path +"-i"+ str(i)+"j"+ str(j) +"e"+str(finalEpoch)
-                        print( "))))))) executing single evaluation on ", path, "-", k )
-                        train_kendall, train_r2, train_f1 = evaluate_single( g, device, model, path )
-                        print( "Single Train Kendall {:.4f}".format( train_kendall ) )
-                        print( "Single Train R2 {:.4f}".format( train_r2 ) )
-                        print( "Single Train f1 {:.4f}".format( train_f1 ) )
+                    train_dataset = DataSetFromYosys( currentDir, split, ablationFeatures, mode='train' )
+                    val_dataset   = DataSetFromYosys( currentDir, split, ablationFeatures, mode='valid' )
+                    test_dataset  = DataSetFromYosys( currentDir, split, ablationFeatures, mode='test'  )
 
-                    g = val_dataset[0].to( device )
-                    path = val_dataset.names[0]
-                    path = imageOutput + "/valid-" + path +"-i"+ str(i)+"j"+ str(j)+"e"+str(finalEpoch)
-                    valid_kendall, valid_r2, valid_f1 = evaluate_single( g, device, model, path )
-                    print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
-                    print( "Single valid R2 {:.4f}".format( valid_r2 ) )
-                    print( "Single valid f1 {:.4f}".format( valid_f1 ) )
+                    features = train_dataset[0].ndata[ featName ]      
+                    if( features.dim() == 1 ):
+                        features = features.unsqueeze(1)
+                    in_size = features.shape[1]
+                    out_size = 1 #TODO parametrize this
+                    print( "in_size", in_size,",  out_size", out_size )
+                    model = GAT( in_size, 256, out_size, heads=[4,4,6] ).to( device )
+                    # model = GAT( in_size, 128, out_size, heads=[4,4,6]).to( device )
+                    # model = SAGE( in_feats = in_size, hid_feats = 125, out_feats  = out_size ).to( device )
 
-                    g = test_dataset[0].to( device )
-                    path = test_dataset.names[0]
-                    path = imageOutput + "/test-" + path +"-i"+ str(i)+"j"+ str(j)+"e"+str(finalEpoch)
-                    test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
+                    print( "\n###################" )
+                    print( "## MODEL DEFINED ##"   )
+                    print( "###################\n" )
 
-                    train_kendall, train_r2, train_f1 = evaluate_in_batches( train_dataloader, device, model )
-                    print( "Total Train Kendall {:.4f}".format( train_kendall ) )
-                    print( "Total Train R2 {:.4f}".format( train_r2 ) )
-                    print( "Total Train f1 {:.4f}".format( train_f1 ) )
+                    # sampler = dgl.dataloading.MultiLayerFullNeighborSampler(2)
+                    # for k in range( len( train_dataset ) ):
+                    #     g = train_dataset[k].to( device )
+                    #     train_dataloader = DataLoader( g, g.nodes, graph_sampler = sampler, batch_size=1, use_uva = True, device = device )
+                    # val_dataloader   = DataLoader( val_dataset,   batch_size=1 )
+                    # test_dataloader  = DataLoader( test_dataset,  batch_size=1 ) 
 
-                else:
-                    test_kendall= test_r2= test_f1= train_kendall= train_r2= train_f1=0.0
-                print( "\n###############################\n## FinalEvalRuntime:", round( ( time.time() - startTimeEval ) / 60, 1) , "min ##\n###############################\n" )
-                iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
-                print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n" )
+                    # Create the samplers
+                    # train_sampler = RandomSampler(train_dataset)  # Randomly sample from the training dataset
+                    #sampler = NeighborSampler( g, [10,5,4], shuffle=True, num_workers=4)
 
-                with open( summary, 'a' ) as f:
-                    f.write( str(i) + ","+str(j)+","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( accMem/finalEpoch )+","+ val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
-                    f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() ) )  #+"\n")
-                    f.write( "," + str( train_f1.item() ) +","+ str( valid_f1.item() ) +","+ str( test_f1.item() )  +"\n")
-                     			
-                del model
-                del train_dataset
-                del val_dataset
-                del test_dataset
-                del train_dataloader
-                del val_dataloader
-                del test_dataloader
+                    val_sampler = torch.utils.data.SequentialSampler(val_dataset)  # Iterate through the validation dataset sequentially
+                    test_sampler = torch.utils.data.SequentialSampler(test_dataset)  # Iterate through the test dataset sequentially
+
+
+                    train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )#5 , sampler = train_sampler )
+                    val_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
+                    test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
+                    # train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )
+                    # val_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
+                    # test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
+
+                    print( "len( train_dataloader ) number of batches:", len( train_dataloader ) )
+                    print( "\n###################"   )
+                    print( "### SPLIT INFO ####"   )
+                    print( "###################"   )
+
+                    train_dataset.printDataset()    
+                    val_dataset.printDataset()    
+                    test_dataset.printDataset()
+
+                    print( "->original:   ", end="" )
+                    for item in listDir:
+                        print( str( item ).rsplit( '/' )[-1], end=", " )
+                    print( "\n" )
+                    print( "->currentDir: ", end="" )
+                    for item in currentDir:
+                        print( str( item ).rsplit( '/' )[-1], end=", " )
+                    print( "\n" )
+                    print( "testIndex:", testIndex, "validIndex:", validIndex )
+                    print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
+
+                    writerName = "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) ) + "-V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
+                    finalEpoch, maxMem, accMem = train( train_dataloader, val_dataloader, device, model, writerName )
+                    finalEpoch += 1
+
+                    print( '######################\n## Final Evaluation ##\n######################\n' )
+                    startTimeEval = time.time()
+                    if not skipFinalEval:
+                        for k in range( len( train_dataset ) ):
+                            g = train_dataset[k].to( device )
+                            path = train_dataset.names[k]
+                            path = imageOutput + "/train-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex) +"e"+str(finalEpoch)
+                            print( "))))))) executing single evaluation on ", path, "-", k )
+                            train_kendall, train_r2, train_f1 = evaluate_single( g, device, model, path )
+                            print( "Single Train Kendall {:.4f}".format( train_kendall ) )
+                            print( "Single Train R2 {:.4f}".format( train_r2 ) )
+                            print( "Single Train f1 {:.4f}".format( train_f1 ) )
+
+                        g = val_dataset[0].to( device )
+                        path = val_dataset.names[0]
+                        path = imageOutput + "/valid-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex)+"e"+str(finalEpoch)
+                        valid_kendall, valid_r2, valid_f1 = evaluate_single( g, device, model, path )
+                        print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
+                        print( "Single valid R2 {:.4f}".format( valid_r2 ) )
+                        print( "Single valid f1 {:.4f}".format( valid_f1 ) )
+
+                        g = test_dataset[0].to( device )
+                        path = test_dataset.names[0]
+                        path = imageOutput + "/test-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex)+"e"+str(finalEpoch)
+                        test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
+
+                        train_kendall, train_r2, train_f1 = evaluate_in_batches( train_dataloader, device, model )
+                        print( "Total Train Kendall {:.4f}".format( train_kendall ) )
+                        print( "Total Train R2 {:.4f}".format( train_r2 ) )
+                        print( "Total Train f1 {:.4f}".format( train_f1 ) )
+
+                    else:
+                        test_kendall= test_r2= test_f1= train_kendall= train_r2= train_f1=0.0
+                    print( "\n###############################\n## FinalEvalRuntime:", round( ( time.time() - startTimeEval ) / 60, 1) , "min ##\n###############################\n" )
+                    iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
+                    print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n" )
+
+                    with open( summary, 'a' ) as f:
+                        f.write( str(testIndex) + ","+str(validIndex)+","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( accMem/finalEpoch )+","+ val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() )) #  +"\n")
+                        f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() ) )  #+"\n")
+                        f.write( "," + str( train_f1.item() ) +","+ str( valid_f1.item() ) +","+ str( test_f1.item() )  +"\n")
+
+                    del model
+                    del train_dataset
+                    del val_dataset
+                    del test_dataset
+                    del train_dataloader
+                    del val_dataloader
+                    del test_dataloader
     endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 1 )
     with open( summary, 'a' ) as f:
         f.write( ",,," + str( endTimeAll ) + " hours" ) #,,average,=AVERAGE(),=AVERAGE(),=AVERAGE()\n,,,,,median,=MEDIAN(),=MEDIAN(),=MEDIAN()" )
