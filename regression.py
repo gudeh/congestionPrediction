@@ -1,20 +1,22 @@
 import os
 import shutil
+import csv
+import re # handle type to category names AND_X1
+import time
+import math #ceil()
 import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
+import seaborn as sns
+from pathlib import Path #Reading CSV files
+from random import shuffle #shuffle train/valid/test
+from itertools import combinations # ablation to test multiple features
+
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from matplotlib import cm
 import matplotlib.colorbar as mcb
 import matplotlib.colors as mcolors
-import seaborn as sns
-from pathlib import Path #Reading CSV files
-import math #ceil()
-from random import shuffle #shuffle train/valid/test
-import re # handle type to category names AND_X1
-import time
-from itertools import combinations # ablation to test multiple features
 
 import torch
 import torch.nn as nn
@@ -49,7 +51,7 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 #print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 #print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [ 'type' ] # , 'size' ]
+listFeats = [ 'type', 'pagerank' ] # , 'size' ]
 featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
@@ -57,6 +59,7 @@ labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
 maxEpochs = 0
+minEpochs = 0
 useEarlyStop = False
 step      = 0.005
 accumulation_steps = 4
@@ -66,7 +69,7 @@ DEBUG         = 0 #1 for evaluation inside train
 DRAWOUTPUTS   = False
 CUDA          = True
 DOLEARN       = True
-skipFinalEval = False #TODO True
+SKIPFINALEVAL = False #TODO True
 
 
 SELF_LOOP = True
@@ -122,6 +125,7 @@ def preProcessData( listDir ):
                             nameToCategory[ match.group( 1 ) ] =  len( nameToCategory ) + 1
                             #typeTo2Categories[ cellType ] = [ nameToCategory[ match.group( 0 ) ], match.group( 1 ) ]
                         if cellType not in typeToNameCat:
+                            # TODO: if want to reuse the dividing of type_size into type and size, rework this
                             # if len( listFeats ) == 2:
                             #     typeToNameCat[ cellType ] = nameToCategory[ match.group( 1 ) ]
                             #     typeToSize[ cellType ]    = int( match.group( 2 ) )
@@ -343,11 +347,23 @@ class DataSetFromYosys( DGLDataset ):
             # pr_scores = cugraph.pagerank(cu_graph)
             # betweenness_scores = cugraph.betweenness_centrality(cu_graph)
 
-            pagerank_scores_list = list(pagerank_scores.values())
-            pagerank_tensor = torch.tensor(pagerank_scores_list)
+            pagerank_scores_list = list( pagerank_scores.values() )
+            # Perform min-max scaling to normalize the scores to the range [0, 1]
+            min_score = min(pagerank_scores_list)
+            max_score = max(pagerank_scores_list)
+            normalized_scores = [(score - min_score) / (max_score - min_score) for score in pagerank_scores_list]
+            # pagerank_tensor = torch.tensor( pagerank_scores_list )
+            pagerank_tensor = torch.tensor(normalized_scores)
             self.graph.ndata[listFeats[1]] = pagerank_tensor
             # self.graph.ndata[ listFeats[1] ] = [pagerank_scores[node] for node in range(self.graph.number_of_nodes())]
             #self.graph.ndata[ listFeats[2] ] = [betweenness_scores[node] for node in range(self.graph.number_of_nodes())]
+            print( "self.graph.ndata:", self.graph.ndata )
+            ndata_tensor = self.graph.ndata[listFeats[1]]
+            ndata_array = ndata_tensor.numpy()
+            # Convert the array to a DataFrame
+            df = pd.DataFrame(ndata_array)
+            csv_file = "temp/" + self.graph.name + "pageRank.csv"
+            df.to_csv( csv_file, index = False )
 
         return self.graph
            
@@ -859,7 +875,8 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
             val_epochs_without_improvement = 0  # Reset the counter
         else:
             val_epochs_without_improvement += 1
-        if useEarlyStop and (epochs_without_improvement >= patience or val_epochs_without_improvement >= patience):
+        # if useEarlyStop and (epochs_without_improvement >= patience or val_epochs_without_improvement >= patience):
+        if useEarlyStop and ( epoch >= minEpochs ) and (epochs_without_improvement >= patience or val_epochs_without_improvement >= patience):
             print("=======> Early stopping!")
             break
 
@@ -966,7 +983,9 @@ if __name__ == '__main__':
     summary = "runSummary.csv"
     with open( summary, 'w' ) as f:
         f.write( "#Circuits:" + str( len( listDir ) ) )
+        f.write( ",minEpochs:" + str( minEpochs ) )
         f.write( ",maxEpochs:" + str( maxEpochs ) )
+        f.write( ",step:" + str( round( step, 5 ) ) )
         f.write( ",labelName:" + labelName )
         f.write( ",features:" ) 
         f.write( ";".join( listFeats ) )
@@ -983,7 +1002,8 @@ if __name__ == '__main__':
         for ablationFeatures in combinations_list:
             ablationFeatures = list( ablationFeatures )
             for testIndex in [ 7 ]: #0-aes, 4-dynamic, 7-swerv
-                for validIndex in range( len( listDir ) ):
+                # for validIndex in range( len( listDir ) ):
+                for validIndex in range( 0, 2 ): # for testing only
                     if testIndex == validIndex:
                         continue
                     startIterationTime = time.time()
@@ -1066,7 +1086,7 @@ if __name__ == '__main__':
 
                     print( '######################\n## Final Evaluation ##\n######################\n' )
                     startTimeEval = time.time()
-                    if not skipFinalEval:
+                    if not SKIPFINALEVAL:
                         for k in range( len( train_dataset ) ):
                             g = train_dataset[k].to( device )
                             path = train_dataset.names[k]
