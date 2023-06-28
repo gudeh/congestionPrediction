@@ -51,21 +51,21 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 #print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 #print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [ 'logicDepth' , 'pageRank', 'type', ]
+listFeats = [  'pageRank', 'type', ]
 featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 500
-minEpochs = 50
+maxEpochs = 0
+minEpochs = 0
 useEarlyStop = True
 step      = 0.005
 accumulation_steps = 4
 
 
-DEBUG         = 0 #1 for evaluation inside train
+DEBUG         = 1 #1 for evaluation inside train
 DRAWOUTPUTS   = False
 CUDA          = True
 DOLEARN       = True
@@ -127,14 +127,15 @@ def preProcessData( listDir ):
         for cellType in gateToHeat[ rawFeatName ]:
             # if cellType not in nameToCategory:
             #     nameToCategory[ cellType ] = len( nameToCategory )
-            if "FILLCELL" not in cellType and "TAPCELL" not in cellType:
+            #if "FILLCELL" not in cellType and "TAPCELL" not in cellType:
+            pattern = r"(FILLCELL|TAPCELL)" #|.*ff.*)"
+            if not any( re.search( pattern, cell, re.IGNORECASE ) for cell in cellType ):
                 match = re.match( regexp, cellType )
                 #print( "len( match.groups( ) )", len( match.groups( ) ))
                 if match: 
                     if len( match.groups( ) ) == 2:
-                        if match.group( 1 ) not in nameToCategory:
-                            nameToCategory[ match.group( 1 ) ] =  len( nameToCategory ) + 1
-                            #typeTo2Categories[ cellType ] = [ nameToCategory[ match.group( 0 ) ], match.group( 1 ) ]
+                        # if match.group( 1 ) not in nameToCategory:
+                        #     nameToCategory[ match.group( 1 ) ] =  len( nameToCategory ) + 1
                         if cellType not in typeToNameCat:
                             # TODO: if want to reuse the dividing of type_size into type and size, rework this
                             # if len( listFeats ) == 2:
@@ -178,7 +179,7 @@ def preProcessData( listDir ):
     print( "\n\n\labelToStandard:\n", sorted( labelToStandard.items() ), "size:", len( labelToStandard  ) )
     #######################################################################
 	    
-    print( "\n\n\nnameToCategory:\n", nameToCategory, "size:", len( nameToCategory  ) )
+    # print( "\n\n\nnameToCategory:\n", nameToCategory, "size:", len( nameToCategory  ) )
     print( "\n\n\ntypeToNameCat:\n", typeToNameCat, "size:", len( typeToNameCat  ) )
     print( "\n\n\ntypeToSize:\n", typeToSize, "size:", len( typeToSize  ) )
 
@@ -296,24 +297,27 @@ class DataSetFromYosys( DGLDataset ):
         print( "AFTER MERGE nodes_data:", nodes_data.shape, "\n", nodes_data )
         
         print( "self.ablationFeatures:", type( self.ablationFeatures ), "\n", self.ablationFeatures )
-        for column in self.ablationFeatures:
-            if column not in nodes_data:
-                nodes_data[ column ] = 0                
+
+        # for column in self.ablationFeatures:
+        #     if column not in nodes_data:
+        #         nodes_data[ column ] = 0
+        nodes_data.update(pd.DataFrame({column: 0 for column in self.ablationFeatures if column not in nodes_data}, index=[0]))
         df = nodes_data[ [ rawFeatName ] + [ labelName ] ]
-        if rawFeatName in self.ablationFeatures:
-            df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] > 0, True, False ) )
-        else:
-            df_wanted = np.where( df[ labelName ] > 0, True, False )
-        df_wanted = np.invert( df_wanted )
+        
+        # if rawFeatName in self.ablationFeatures:
+        #     df_wanted = np.logical_and ( np.where( df[ rawFeatName ] > 0, True, False ), np.where( df[ labelName ] > 0, True, False ) )
+        # else:
+        #     df_wanted = np.where( df[ labelName ] > 0, True, False )
+        # df_wanted = np.invert( df_wanted )
+        df_wanted = (df[rawFeatName] > 0) & (df[labelName] > 0) if rawFeatName in self.ablationFeatures else (df[labelName] > 0)
+        df_wanted = ~df_wanted
+        
     #		print( "df_wanted:", df_wanted.shape, "\n", df_wanted )
         removedNodesMask = torch.tensor( df_wanted )
     #		print( "removedNodesMask:", removedNodesMask.shape )#, "\n", removedNodesMask )
         print( "nodes_data:", type( nodes_data ), nodes_data.shape, "\n", nodes_data )
         idsToRemove = torch.tensor( nodes_data.index )[ removedNodesMask ]
         print( "idsToRemove:", idsToRemove.shape ) #"\n", torch.sort( idsToRemove ) )
-
-        # self.drawData = pd.merge( toMerge, positions, on = "name" )
-        # print( "DRAW DATA:\n", self.drawData )
 
     ###################### BUILD GRAPH #####################################        
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
@@ -324,46 +328,55 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ rawFeatName ].values )
         self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
+            
 
-    ###################### LOGIC DEPTH #####################################                                               
-        # if 'logicDepth' in self.ablationFeatures:
-        #     print( "calculating logic depth!", self.graph.name, flush = True )
-        #     depths = np.zeros( self.graph.number_of_nodes(), dtype=int)
-        #     for node in range( self.graph.number_of_nodes() ):
-        #         visited = np.zeros(self.graph.number_of_nodes(), dtype=bool)
-        #         queue = [(node, 0)]
-        #         visited[node] = True
+    ###################### LOGIC DEPTH #####################################
+        drawGraph( self.graph, self.graph.name )
+        def is_acyclic(graph):
+            try:
+                nx.is_directed_acyclic_graph( graph.to_networkx() )
+                return True
+            except nx.NetworkXUnfeasible:
+                return False
+        G = nx.DiGraph()
+        G.add_nodes_from([1, 2, 3, 4])        
+        G.add_edges_from([(1, 2), (2, 3), (3, 4), (4, 1)])
+        if nx.is_directed_acyclic_graph(G):
+            print("The graph is acyclic.")
+        else:
+            print("The graph contains cycles.")
 
-        #         while len( queue ) > 0:
-        #             current_node, depth = queue.pop(0)
-        #             depths[current_node] = max(depths[current_node], depth)
-        #             neighbors = self.graph.successors(current_node).numpy()
-        #             for neighbor in neighbors:
-        #                 if not visited[neighbor]:
-        #                     queue.append((neighbor, depth + 1))
-        #                     visited[neighbor] = True
-        #             #print( len( queue ) )
-        #     self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, torch.tensor( depths ) )
-
-        if 'logicDepth' in self.ablationFeatures:
+        if is_acyclic( self.graph ):
+            print("The graph is acyclic.")
+        else:
+            print("The graph contains cycles.")
+        
+        if 'logicDepth' in self.ablationFeatures:            
             print("calculating logic depth!", self.graph.name, flush=True)
             depths = np.zeros(self.graph.number_of_nodes(), dtype=int)
             inputs = [node for node in self.graph.nodes() if self.graph.in_degrees(node) == 0 and self.graph.out_degrees(node) > 0]
             outputs = [node for node in self.graph.nodes() if self.graph.out_degrees(node) == 0 and self.graph.in_degrees(node) > 0]
 
-            def dfs(node, depth):
+            print("depths:", len(depths))
+            print("inputs:", len(inputs), flush=True)
+            print("outputs:", len(outputs), flush=True)
+
+            stack = []
+
+            for node in outputs:
+                print("output node:", node, flush=True)
+                stack.append((node, 0, [node]))
+
+            while stack:
+                node, depth, path = stack.pop()
                 depths[node] = max(depths[node], depth)
                 neighbors = self.graph.predecessors(node).numpy()
                 for neighbor in neighbors:
-                    if depths[neighbor] < depth + 1:
-                        dfs(neighbor, depth + 1)
-
-            for node in outputs:
-                dfs(node, 0)
+                    if neighbor not in path and depths[neighbor] < depth + 1:
+                        stack.append((neighbor, depth + 1, path + [neighbor]))
 
             self.graph.ndata[featName] = dynamicConcatenate(self.graph.ndata, torch.tensor(depths))
-
-
+        
     ################### REMOVE NODES #############################################
         print( "---> BEFORE REMOVED NODES:")
         print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
@@ -378,9 +391,9 @@ class DataSetFromYosys( DGLDataset ):
             self.graph = dgl.add_self_loop( self.graph )
         print( "\n---> AFTER REMOVED NODES:" )
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
-        #		print( "\tself.graph.ndata\n", self.graph.ndata )
+        print( "\tself.graph.ndata\n", self.graph.ndata )
         # print( "DRAW DATA:\n", self.drawData )
-
+        
     ################### PAGE RANK ################################################    
         if 'pageRank' in self.ablationFeatures:
             nx_graph = self.graph.to_networkx()
@@ -422,7 +435,7 @@ class DataSetFromYosys( DGLDataset ):
             totalEdges += self.graphs[idx].num_edges()    
         print( "Total Vertices:", totalNodes )
         print( "Total Edges:   ", totalEdges )
-            #drawGraph( self.graphs[idx], self.names[idx] )
+        #drawGraph( self.graphs[idx], self.names[idx] )
 
     def getNames( self ):
 	    return self.names
@@ -432,6 +445,7 @@ class DataSetFromYosys( DGLDataset ):
 
 
 def drawGraph( graph, graphName ):
+    print( "Drawing graph:", graphName )
 #    print("graph:",type(graph))
 #    print('We have %d nodes.' % graph.number_of_nodes())
 #    print('We have %d edges.' % graph.number_of_edges())
