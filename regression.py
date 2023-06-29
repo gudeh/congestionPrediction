@@ -51,7 +51,7 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 #print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 #print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [  'pageRank', 'type', ]
+listFeats = [  'logicDepth', 'pageRank', 'type', ]
 featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
@@ -128,7 +128,7 @@ def preProcessData( listDir ):
             # if cellType not in nameToCategory:
             #     nameToCategory[ cellType ] = len( nameToCategory )
             #if "FILLCELL" not in cellType and "TAPCELL" not in cellType:
-            pattern = r"(FILLCELL|TAPCELL)" #|.*ff.*)"
+            pattern = r"(FILLCELL|TAPCELL|.*ff.*|.*clk.*)"
             if not any( re.search( pattern, cell, re.IGNORECASE ) for cell in cellType ):
                 match = re.match( regexp, cellType )
                 #print( "len( match.groups( ) )", len( match.groups( ) ))
@@ -298,10 +298,10 @@ class DataSetFromYosys( DGLDataset ):
         
         print( "self.ablationFeatures:", type( self.ablationFeatures ), "\n", self.ablationFeatures )
 
-        # for column in self.ablationFeatures:
-        #     if column not in nodes_data:
-        #         nodes_data[ column ] = 0
-        nodes_data.update(pd.DataFrame({column: 0 for column in self.ablationFeatures if column not in nodes_data}, index=[0]))
+        for column in self.ablationFeatures:
+            if column not in nodes_data:
+                nodes_data[ column ] = 0
+        #nodes_data.update(pd.DataFrame({column: 0 for column in self.ablationFeatures if column not in nodes_data}, index=[0]))
         df = nodes_data[ [ rawFeatName ] + [ labelName ] ]
         
         # if rawFeatName in self.ablationFeatures:
@@ -331,7 +331,7 @@ class DataSetFromYosys( DGLDataset ):
             
 
     ###################### LOGIC DEPTH #####################################
-        drawGraph( self.graph, self.graph.name )
+        #drawGraph( self.graph, self.graph.name )
         def is_acyclic(graph):
             try:
                 nx.is_directed_acyclic_graph( graph.to_networkx() )
@@ -363,17 +363,29 @@ class DataSetFromYosys( DGLDataset ):
 
             stack = []
 
+            # for node in outputs:
+            #     print("output node:", node, flush=True)
+            #     stack.append((node, 0, [node]))
+
+            # while stack:
+            #     node, depth, path = stack.pop()
+            #     depths[node] = max(depths[node], depth)
+            #     neighbors = self.graph.predecessors(node).numpy()
+            #     for neighbor in neighbors:
+            #         if neighbor not in path and depths[neighbor] < depth + 1:
+            #             stack.append((neighbor, depth + 1, path + [neighbor]))
             for node in outputs:
                 print("output node:", node, flush=True)
-                stack.append((node, 0, [node]))
+                stack.append((node, 0, {node}))
 
             while stack:
                 node, depth, path = stack.pop()
                 depths[node] = max(depths[node], depth)
-                neighbors = self.graph.predecessors(node).numpy()
+                neighbors = self.graph.predecessors(node)
                 for neighbor in neighbors:
                     if neighbor not in path and depths[neighbor] < depth + 1:
-                        stack.append((neighbor, depth + 1, path + [neighbor]))
+                        stack.append((neighbor, depth + 1, path | {neighbor}))
+
 
             self.graph.ndata[featName] = dynamicConcatenate(self.graph.ndata, torch.tensor(depths))
         
