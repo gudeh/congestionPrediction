@@ -1,3 +1,4 @@
+./designs/nangate45/gcd/config.mk
 ./designs/nangate45/aes/config.mk
 ./designs/nangate45/ariane136/config.mk
 ./designs/nangate45/black_parrot/config.mk
@@ -5,7 +6,6 @@
 ./designs/nangate45/bp_fe_top/config.mk
 ./designs/nangate45/bp_multi_top/config.mk
 ./designs/nangate45/dynamic_node/config.mk
-./designs/nangate45/gcd/config.mk
 ./designs/nangate45/ibex/config.mk
 ./designs/nangate45/jpeg/config.mk
 ./designs/nangate45/swerv/config.mk
