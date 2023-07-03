@@ -51,15 +51,15 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 #print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 #print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [  'logicDepth', 'pageRank', 'type', ]
+listFeats = [ 'type', 'pageRank' ]
 featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 0
-minEpochs = 0
+maxEpochs = 800
+minEpochs = 200
 useEarlyStop = True
 step      = 0.005
 accumulation_steps = 4
@@ -125,29 +125,22 @@ def preProcessData( listDir ):
         graphs[ path ] = gateToHeat#.append( gateToHeat )
         #Other category encoder possibilities: https://contrib.scikit-learn.org/category_encoders/
         for cellType in gateToHeat[ rawFeatName ]:
-            # if cellType not in nameToCategory:
-            #     nameToCategory[ cellType ] = len( nameToCategory )
-            #if "FILLCELL" not in cellType and "TAPCELL" not in cellType:
-            pattern = r"(FILLCELL|TAPCELL|.*ff.*|.*clk.*)"
-            if not any( re.search( pattern, cell, re.IGNORECASE ) for cell in cellType ):
+            #print( "cellType", type( cellType ), cellType )
+            pattern = r"(FILLCELL|TAPCELL|.*ff.*|.*clk.*|.*dlh.*|.*dll.*|.*tlat.*)"
+            # if not any( re.search( pattern, cell, re.IGNORECASE ) for cell in cellType ):
+            if not re.search(pattern, cellType, re.IGNORECASE):
                 match = re.match( regexp, cellType )
-                #print( "len( match.groups( ) )", len( match.groups( ) ))
+                # print( "wanted cell type:", cellType )
                 if match: 
                     if len( match.groups( ) ) == 2:
-                        # if match.group( 1 ) not in nameToCategory:
-                        #     nameToCategory[ match.group( 1 ) ] =  len( nameToCategory ) + 1
                         if cellType not in typeToNameCat:
-                            # TODO: if want to reuse the dividing of type_size into type and size, rework this
-                            # if len( listFeats ) == 2:
-                            #     typeToNameCat[ cellType ] = nameToCategory[ match.group( 1 ) ]
-                            #     typeToSize[ cellType ]    = int( match.group( 2 ) )
-                            # else:
                             typeToNameCat[ cellType ] = len( typeToNameCat )
                 else:
                     print( "WARNING: Unexpected cell type:", cellType )    
                     typeToNameCat[ cellType ] = -1
                     typeToSize[ cellType ]    = -1
             else:
+                print( "Removing unwanted cell type:", cellType )
                 typeToNameCat[ cellType ] = -1
                 typeToSize[ cellType ]    = -1
 
@@ -309,7 +302,7 @@ class DataSetFromYosys( DGLDataset ):
         # else:
         #     df_wanted = np.where( df[ labelName ] > 0, True, False )
         # df_wanted = np.invert( df_wanted )
-        df_wanted = (df[rawFeatName] > 0) & (df[labelName] > 0) if rawFeatName in self.ablationFeatures else (df[labelName] > 0)
+        df_wanted = (df[rawFeatName] > 0) & (df[labelName] >= 0) if rawFeatName in self.ablationFeatures else (df[labelName] >= 0)
         df_wanted = ~df_wanted
         
     #		print( "df_wanted:", df_wanted.shape, "\n", df_wanted )
@@ -317,7 +310,7 @@ class DataSetFromYosys( DGLDataset ):
     #		print( "removedNodesMask:", removedNodesMask.shape )#, "\n", removedNodesMask )
         print( "nodes_data:", type( nodes_data ), nodes_data.shape, "\n", nodes_data )
         idsToRemove = torch.tensor( nodes_data.index )[ removedNodesMask ]
-        print( "idsToRemove:", idsToRemove.shape ) #"\n", torch.sort( idsToRemove ) )
+        print( "idsToRemove:", idsToRemove.shape ,"\n", torch.sort( idsToRemove ) )
 
     ###################### BUILD GRAPH #####################################        
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
@@ -329,13 +322,29 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
             
-
+     
+    ################### REMOVE NODES #############################################
+        print( "---> BEFORE REMOVED NODES:")
+        print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
+        #print( "\tself.graph.ndata\n", self.graph.ndata )		
+        self.graph.remove_nodes( idsToRemove )
+        # self.drawData = self.drawData.drop( idsToRemove.tolist(), axis=1 )        
+        isolated_nodes = ( ( self.graph.in_degrees() == 0 ) & ( self.graph.out_degrees() == 0 ) ).nonzero().squeeze(1)
+        print( "isolated_nodes:", isolated_nodes.shape ) #, "\n", isolated_nodes )
+        self.graph.remove_nodes( isolated_nodes )
+        #self.drawData = self.drawData.drop( isolated_nodes.tolist(), axis=1 )
+        if SELF_LOOP:
+            self.graph = dgl.add_self_loop( self.graph )
+        print( "\n---> AFTER REMOVED NODES:" )
+        print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
+        print( "\tself.graph.ndata\n", self.graph.ndata )
+        # print( "DRAW DATA:\n", self.drawData )
+        
     ###################### LOGIC DEPTH #####################################
         #drawGraph( self.graph, self.graph.name )
         def is_acyclic(graph):
             try:
-                nx.is_directed_acyclic_graph( graph.to_networkx() )
-                return True
+                return nx.is_directed_acyclic_graph( graph.to_networkx() )
             except nx.NetworkXUnfeasible:
                 return False
         G = nx.DiGraph()
@@ -386,26 +395,8 @@ class DataSetFromYosys( DGLDataset ):
                     if neighbor not in path and depths[neighbor] < depth + 1:
                         stack.append((neighbor, depth + 1, path | {neighbor}))
 
-
             self.graph.ndata[featName] = dynamicConcatenate(self.graph.ndata, torch.tensor(depths))
-        
-    ################### REMOVE NODES #############################################
-        print( "---> BEFORE REMOVED NODES:")
-        print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
-        #print( "\tself.graph.ndata\n", self.graph.ndata )		
-        self.graph.remove_nodes( idsToRemove )
-        # self.drawData = self.drawData.drop( idsToRemove.tolist(), axis=1 )        
-        isolated_nodes = ( ( self.graph.in_degrees() == 0 ) & ( self.graph.out_degrees() == 0 ) ).nonzero().squeeze(1)
-        print( "isolated_nodes:", isolated_nodes.shape ) #, "\n", isolated_nodes )
-        self.graph.remove_nodes( isolated_nodes )
-        #self.drawData = self.drawData.drop( isolated_nodes.tolist(), axis=1 )
-        if SELF_LOOP:
-            self.graph = dgl.add_self_loop( self.graph )
-        print( "\n---> AFTER REMOVED NODES:" )
-        print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
-        print( "\tself.graph.ndata\n", self.graph.ndata )
-        # print( "DRAW DATA:\n", self.drawData )
-        
+
     ################### PAGE RANK ################################################    
         if 'pageRank' in self.ablationFeatures:
             nx_graph = self.graph.to_networkx()
