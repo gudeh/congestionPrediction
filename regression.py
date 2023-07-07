@@ -51,22 +51,22 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 #print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 #print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [ 'type', 'pageRank' ]
+listFeats = [ 'eigen', 'type', 'pageRank'] #, 'closeness', 'between' ] # logicDepth
 featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 800
-minEpochs = 200
+maxEpochs = 0
+minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 accumulation_steps = 4
 
 
 DEBUG         = 1 #1 for evaluation inside train
-DRAWOUTPUTS   = False
+DRAWOUTPUTS   = True
 CUDA          = True
 DOLEARN       = True
 SKIPFINALEVAL = False #TODO True
@@ -123,14 +123,13 @@ def preProcessData( listDir ):
         # nametoHeat = dict( zip( gateToHeat[ 'name' ], gateToHeat[ labelName ] ) )
         labelsAux = pd.concat( [ labelsAux, gateToHeat[ labelName ] ], names = [ labelName ] )
         graphs[ path ] = gateToHeat#.append( gateToHeat )
-        #Other category encoder possibilities: https://contrib.scikit-learn.org/category_encoders/
         for cellType in gateToHeat[ rawFeatName ]:
             #print( "cellType", type( cellType ), cellType )
-            pattern = r"(FILLCELL|TAPCELL|.*ff.*|.*clk.*|.*dlh.*|.*dll.*|.*tlat.*)"
-            # if not any( re.search( pattern, cell, re.IGNORECASE ) for cell in cellType ):
+            # pattern = r"(FILLCELL|TAPCELL|.*ff.*|.*clk.*|.*dlh.*|.*dll.*|.*tlat.*)"
+            pattern = r"(FILLCELL|TAPCELL)"
             if not re.search(pattern, cellType, re.IGNORECASE):
                 match = re.match( regexp, cellType )
-                # print( "wanted cell type:", cellType )
+                #print( "wanted cell type:", cellType )
                 if match: 
                     if len( match.groups( ) ) == 2:
                         if cellType not in typeToNameCat:
@@ -140,7 +139,7 @@ def preProcessData( listDir ):
                     typeToNameCat[ cellType ] = -1
                     typeToSize[ cellType ]    = -1
             else:
-                print( "Removing unwanted cell type:", cellType )
+                #print( "Removing unwanted cell type:", cellType )
                 typeToNameCat[ cellType ] = -1
                 typeToSize[ cellType ]    = -1
 
@@ -239,7 +238,7 @@ class DataSetFromYosys( DGLDataset ):
 
         for idx in range( len( listDir ) ):
             allNames.append( str( listDir[idx] ).rsplit( '/' )[-1] )
-            #print( allNames[idx],",", end="" )
+            print( allNames[idx],",", end="" )
     #        train, validate, test = np.split(files, [int(len(files)*0.8), int(len(files)*0.9)])
         firstSlice  = math.ceil( len( listDir )*split[0] ) - 1
         secondSlice = math.ceil( len( listDir )*split[1] + firstSlice )
@@ -253,7 +252,7 @@ class DataSetFromYosys( DGLDataset ):
 	        firstSlice  = -2
 	        secondSlice = -1
          
-        print( "\nlen(listDir)",len(listDir))
+        print( "\nlen(listDir)",len(listDir), flush = True)
         print( "firstSlice:", firstSlice, "\nsecondSlice", secondSlice )
         if mode == 'train':
 	        self.graphPaths = listDir [ : firstSlice ]
@@ -322,7 +321,6 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
             
-     
     ################### REMOVE NODES #############################################
         print( "---> BEFORE REMOVED NODES:")
         print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
@@ -333,69 +331,137 @@ class DataSetFromYosys( DGLDataset ):
         print( "isolated_nodes:", isolated_nodes.shape ) #, "\n", isolated_nodes )
         self.graph.remove_nodes( isolated_nodes )
         #self.drawData = self.drawData.drop( isolated_nodes.tolist(), axis=1 )
-        if SELF_LOOP:
-            self.graph = dgl.add_self_loop( self.graph )
         print( "\n---> AFTER REMOVED NODES:" )
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
         print( "\tself.graph.ndata\n", self.graph.ndata )
         # print( "DRAW DATA:\n", self.drawData )
-        
-    ###################### LOGIC DEPTH #####################################
+
+    ################### CLOSENESS  ################################################
         #drawGraph( self.graph, self.graph.name )
-        def is_acyclic(graph):
-            try:
-                return nx.is_directed_acyclic_graph( graph.to_networkx() )
-            except nx.NetworkXUnfeasible:
-                return False
-        G = nx.DiGraph()
-        G.add_nodes_from([1, 2, 3, 4])        
-        G.add_edges_from([(1, 2), (2, 3), (3, 4), (4, 1)])
-        if nx.is_directed_acyclic_graph(G):
-            print("The graph is acyclic.")
-        else:
-            print("The graph contains cycles.")
+        if 'closeness' in self.ablationFeatures:
+            print( "calculating closeness!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            # print( ".nodes:\n", nx_graph.nodes(data=True))
+            # print( ".edges:\n", nx_graph.edges(data=True))
+                   
+            close_scores = nx.closeness_centrality( nx_graph )
+            # close_scores = nx.incremental_closeness_centrality( nx_graph )
+            close_scores_list = list( close_scores.values() )
+            min_score = min( close_scores_list )
+            max_score = max( close_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in close_scores_list ] 
+            close_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, close_tensor )
 
-        if is_acyclic( self.graph ):
-            print("The graph is acyclic.")
-        else:
-            print("The graph contains cycles.")
+    ################### EIGENVECTOR  ################################################
+        #drawGraph( self.graph, self.graph.name )
+        if 'eigen' in self.ablationFeatures:
+            print( "calculating eigenvector!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            # print( ".nodes:\n", nx_graph.nodes(data=True))
+            # print( ".edges:\n", nx_graph.edges(data=True))
+                   
+            # eigen_scores = nx.eigenvector_centrality( nx_graph )
+            eigen_scores = nx.eigenvector_centrality_numpy( nx_graph, max_iter = 500 )
+            eigen_scores_list = list( eigen_scores.values() )
+            min_score = min( eigen_scores_list )
+            max_score = max( eigen_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in eigen_scores_list ] 
+            eigen_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, eigen_tensor )
+
+    ################### GROUP BETWEENNESS  ################################################
+        #drawGraph( self.graph, self.graph.name )
+        if 'between' in self.ablationFeatures:
+            print( "calculating group betweenness!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            # print( ".nodes:\n", nx_graph.nodes(data=True))
+            # print( ".edges:\n", nx_graph.edges(data=True))
+
+            group_betweenness = {}
+            group_distance = 3
+            for node in nx_graph.nodes():
+                print( "node", node, flush = True )
+                subgraph = nx.ego_graph( nx_graph, node, radius = group_distance )
+                # group_betweenness[node] = nx.group_betweenness_centrality( nx_graph, subgraph )
+                if nx.is_connected( subgraph ) and len( subgraph ) > 2:
+                    group_betweenness[node] = nx.group_betweenness_centrality(nx_graph, subgraph)
+                else:
+                    group_betweenness[node] = {}
+
+            for node, centrality in group_betweenness.items():
+                print(f"Node {node}:")
+                if isinstance(centrality, float):
+                    print(f"  Group: {centrality}")
+                else:
+                    for group, centrality_score in centrality.items():
+                        print(f"  Group {group}: {centrality_score}")
+            group_betweenness_list = list( group_betweenness.values() )
+            min_score = min( group_betweenness_list )
+            max_score = max( group_betweenness_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in group_betweenness_list ] 
+            between_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, between_tensor )
+    # ###################### LOGIC DEPTH #####################################
+    #     #drawGraph( self.graph, "afterRemove_" + self.graph.name )
+    #     def is_acyclic(graph):
+    #         try:
+    #             cycle = nx.find_cycle( graph.to_networkx(), orientation='original' )
+    #             print("cycle:", cycle, flush = True )
+    #             return False  # Found a cycle
+    #         except nx.NetworkXNoCycle:
+    #             return True  # No cycles found
+    #     src = [0, 1, 2, 3]
+    #     dst = [1, 2, 3, 0]
+    #     G = dgl.graph((src, dst))
+    #     src = [0, 1, 2]
+    #     dst = [1, 2, 3]
+    #     G2 = dgl.graph((src, dst))
         
-        if 'logicDepth' in self.ablationFeatures:            
-            print("calculating logic depth!", self.graph.name, flush=True)
-            depths = np.zeros(self.graph.number_of_nodes(), dtype=int)
-            inputs = [node for node in self.graph.nodes() if self.graph.in_degrees(node) == 0 and self.graph.out_degrees(node) > 0]
-            outputs = [node for node in self.graph.nodes() if self.graph.out_degrees(node) == 0 and self.graph.in_degrees(node) > 0]
+    #     src = [ 180,179,181,181,177,176,138,137,137,136,136,135,134,175,178 ]
+    #     dst = [ 178,178,177,180,175,175,176,177,179,176,181,181,179,133,132 ]
+    #     G3 = dgl.graph((src, dst))
 
-            print("depths:", len(depths))
-            print("inputs:", len(inputs), flush=True)
-            print("outputs:", len(outputs), flush=True)
+    #     print( "check cycle in graph G" )
+    #     print( "G is_acyclic:", type( is_acyclic( G ) ),  is_acyclic( G ) )
+    #     print( "check cycle in graph G2" )
+    #     print( "G2 is_acyclic:", type( is_acyclic( G2 ) ),  is_acyclic( G2 ) )
+    #     print( "check cycle in graph G3" )
+    #     print( "G3 is_acyclic:", type( is_acyclic( G3 ) ),  is_acyclic( G3 ) )
+    #     drawGraph( G, "G") 
+    #     drawGraph( G2, "G2" )
+    #     drawGraph( G3, "G3" )
 
-            stack = []
+    #     print( "check cycle in graph self.graph", flush = True )
+    #     print( "self graph is_acyclic:", type( is_acyclic(  self.graph ) ),  is_acyclic( self.graph ), flush = True )
+    #     if 'logicDepth' in self.ablationFeatures:
+    #         print( "calculating logic depth!" )
+    #         print("calculating logic depth!", self.graph.name, flush=True)
+    #         depths = np.zeros(self.graph.number_of_nodes(), dtype=int)
+    #         inputs = [node for node in self.graph.nodes() if self.graph.in_degrees(node) == 0 and self.graph.out_degrees(node) > 0]
+    #         outputs = [node for node in self.graph.nodes() if self.graph.out_degrees(node) == 0 and self.graph.in_degrees(node) > 0]
 
-            # for node in outputs:
-            #     print("output node:", node, flush=True)
-            #     stack.append((node, 0, [node]))
+    #         print("depths:", len(depths))
+    #         print("inputs:", len(inputs), flush=True)
+    #         print("outputs:", len(outputs), flush=True)
 
-            # while stack:
-            #     node, depth, path = stack.pop()
-            #     depths[node] = max(depths[node], depth)
-            #     neighbors = self.graph.predecessors(node).numpy()
-            #     for neighbor in neighbors:
-            #         if neighbor not in path and depths[neighbor] < depth + 1:
-            #             stack.append((neighbor, depth + 1, path + [neighbor]))
-            for node in outputs:
-                print("output node:", node, flush=True)
-                stack.append((node, 0, {node}))
+    #         for output_node in outputs:
+    #             stack = [(output_node, 0)]
+    #             while stack:
+    #                 node, depth = stack.pop()
+    #                 depths[node] = depth
+    #                 for pred_node in self.graph.predecessors(node):
+    #                     if depths[pred_node] >= depth + 1:
+    #                         continue
+    #                     stack.append((pred_node, depth + 1))
 
-            while stack:
-                node, depth, path = stack.pop()
-                depths[node] = max(depths[node], depth)
-                neighbors = self.graph.predecessors(node)
-                for neighbor in neighbors:
-                    if neighbor not in path and depths[neighbor] < depth + 1:
-                        stack.append((neighbor, depth + 1, path | {neighbor}))
-
-            self.graph.ndata[featName] = dynamicConcatenate(self.graph.ndata, torch.tensor(depths))
+    #         self.graph.ndata[featName] = dynamicConcatenate(self.graph.ndata, torch.tensor(depths))
 
     ################### PAGE RANK ################################################    
         if 'pageRank' in self.ablationFeatures:
@@ -414,8 +480,10 @@ class DataSetFromYosys( DGLDataset ):
             # df = pd.DataFrame( ndata_array )
             # csv_file = "temp/" + self.graph.name + "pageRank.csv"
             # df.to_csv( csv_file, index = False )
-    ################################################################################
-
+            
+    ###################################################################
+        if SELF_LOOP:
+            self.graph = dgl.add_self_loop( self.graph )
         print( "self.ablationFeatures (_process_single):", type( self.ablationFeatures ), len( self.ablationFeatures ), self.ablationFeatures )
         print( "---> _process_single DONE.\n\tself.graph.ndata", type( self.graph.ndata ),"\n", self.graph.ndata, flush = True )
 
@@ -639,13 +707,7 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
 ######################################################################################################
 
     
-
-
-
-
-
-
-    
+   
     # sorted_pairs = sorted( zip( label, predict ) )
     # sorted_label, sorted_predict = zip( *sorted_pairs )
     # fig, axes = plt.subplots( nrows = 2, ncols = 1, figsize = ( 10, 10 ) )
@@ -803,7 +865,6 @@ def evaluate_in_batches( dataloader, device, model ):
     total_f1      =  total_f1 / (batch_id + 1)
     return total_kendall, total_r2, total_f1 # return average score
 
-
 def evaluate_single( graph, device, model, path ):
     total_kendall = 0.0
     total_r2      = 0.0
@@ -820,8 +881,6 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
     print( "device in train:", device )
     writer = SummaryWriter( comment = writerName )
 
-    # torch.cuda.reset_peak_memory_stats()
-    # torch.cuda.memory_stats(enable=True)
     torch.cuda.reset_max_memory_allocated()
     accumulated_memory_usage = 0
     max_memory_usage = 0
@@ -829,34 +888,9 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
     #loss_fcn = nn.BCEWithLogitsLoss()
 #    loss_fcn = nn.CrossEntropyLoss()
 #    loss_fcn = nn.L1Loss() 
-    
     loss_fcn = nn.MSELoss()
     optimizer = torch.optim.Adam( model.parameters(), lr = step, weight_decay = 0 )
     
-############## training loop ORIGINAL ################
-#     for epoch in range( maxEpochs ):
-#         model.train()
-#         logits = []
-#         total_loss = 0
-#         for batch_id, batched_graph in enumerate( train_dataloader ):
-#             batched_graph = batched_graph.to(device)
-# #            print( "->batched_graph", type( batched_graph ), batched_graph )
-#             #print("\t%%%% Batch ID ", batch_id )
-#             features = batched_graph.ndata[ featName ].float()
-#             if( features.dim() == 1 ):
-#                 features = features.float().unsqueeze(1)
-#             logits = model( batched_graph, features )
-#             labels = batched_graph.ndata[ labelName ].float()
-#             if( labels.dim() == 1 ): # required if, don't know why shape dont match
-#                 labels = labels.unsqueeze(-1)
-#             loss = loss_fcn( logits, labels )
-#             optimizer.zero_grad()
-#             loss.backward()
-#             optimizer.step()
-#             total_loss += loss.item()
-#         average_loss = total_loss / len(train_dataloader)
-########################################################
-
 ################### Early Stop loop ###########################
     best_loss = float('inf')  # Initialize the best training loss with a large value
     best_val_loss = float('inf')  # Initialize the best validation loss with a large value
@@ -1042,9 +1076,16 @@ if __name__ == '__main__':
         print("\tIndex:", index, "- Path:", listDir[index])
 
 
-    for combAux in range( 1, len( listFeats ) + 1 ):
-        combinations_list = list( combinations( listFeats, combAux ) )
-        print( "combAux:", combAux, ", MAX:", len( listFeats ) + 1 )
+    # for combAux in range( 1, len( listFeats ) + 1 ):
+    #     print( "combAux( iteration ):", combAux, ", MAX:", len( listFeats ) + 1 )
+    #     combinations_list = list( combinations( listFeats, combAux ) )
+    for mainIteration in range( 0, 4 ):
+        print( "##################################################################################" )
+        print( "########################## NEW MAIN RUN  ########################################" )
+        print( "##################################################################################" )
+        print( "mainIteration:", mainIteration )
+        # combinations_list = [('eigen',), ('eigen','type'), ('eigen','pageRank'), ('eigen','pageRank','type')]
+        combinations_list = [ ('eigen','pageRank','type') ]       
         print( "--> combination_list:", len( combinations_list ), combinations_list )
         for ablationIter in combinations_list:
             with open( summary, 'a' ) as f:
@@ -1065,7 +1106,7 @@ if __name__ == '__main__':
                         continue
                     startIterationTime = time.time()
                     print( "##################################################################################" )
-                    print( "############################# New Run ############################################" )
+                    print( "#################### New CrossValid iteration  ###################################" )
                     print( "##################################################################################" )
                     currentDir = listDir.copy()
 
@@ -1080,20 +1121,19 @@ if __name__ == '__main__':
                     train_dataset = DataSetFromYosys( currentDir, split, ablationIter, mode='train' )
                     val_dataset   = DataSetFromYosys( currentDir, split, ablationIter, mode='valid' )
                     test_dataset  = DataSetFromYosys( currentDir, split, ablationIter, mode='test'  )
-
                     features = train_dataset[0].ndata[ featName ]      
                     if( features.dim() == 1 ):
                         features = features.unsqueeze(1)
                     in_size = features.shape[1]
                     out_size = 1 #TODO parametrize this
-                    print( "in_size", in_size,",  out_size", out_size )
+                    print( "in_size", in_size,",  out_size", out_size, flush = True )
                     model = GAT( in_size, 256, out_size, heads=[4,4,6] ).to( device )
                     # model = GAT( in_size, 128, out_size, heads=[4,4,6]).to( device )
                     # model = SAGE( in_feats = in_size, hid_feats = 125, out_feats  = out_size ).to( device )
 
                     print( "\n###################" )
                     print( "## MODEL DEFINED ##"   )
-                    print( "###################\n" )
+                    print( "###################\n", flush = True )
 
                     # sampler = dgl.dataloading.MultiLayerFullNeighborSampler(2)
                     # for k in range( len( train_dataset ) ):
