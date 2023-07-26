@@ -52,7 +52,7 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 #print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 #print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [ 'eigen', 'type', 'pageRank'] #, 'closeness', 'between' ] # logicDepth
+listFeats = [ 'inDegree', 'outDegree', 'eigen', 'type', 'pageRank', ] #, 'closeness', 'between' ] # logicDepth
 featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
@@ -105,7 +105,7 @@ def dynamicConcatenate( featTensor, tensor2 ):
             ret = torch.cat( ( featTensor[ featName ], tensor2.unsqueeze(1) ), dim = 1 )
     else:
         ret = tensor2
-    print( "ret:", ret )
+    #print( "ret:", ret )
     return ret
 
 nameToHeat  =     {}
@@ -224,22 +224,22 @@ def writeDFrameData( listDir, csvName, outName ):
 	
 
 
-class DataSetFromYosys( DGLDataset ):  
+class DataSetFromYosys( DGLDataset ):
     def __init__( self, listDir, split, ablationList, mode='train' ):    
         if len( split ) != 3 or sum( split ) != 1.0:
 	        print("!!!!ERROR: fatal, unexpected split sizes." )
-	        return
-	        
+	        return	        
         self.graphPaths = []
         self.graphs = []
         self.names = []
-        allNames = []
+        self.allNames = []
         self.mode = mode
         self.ablationFeatures = ablationList
+        self.namesOfFeatures = []
 
         for idx in range( len( listDir ) ):
-            allNames.append( str( listDir[idx] ).rsplit( '/' )[-1] )
-            print( allNames[idx],",", end="" )
+            self.allNames.append( str( listDir[idx] ).rsplit( '/' )[-1] )
+            print( self.allNames[idx],",", end="" )
     #        train, validate, test = np.split(files, [int(len(files)*0.8), int(len(files)*0.9)])
         firstSlice  = math.ceil( len( listDir )*split[0] ) - 1
         secondSlice = math.ceil( len( listDir )*split[1] + firstSlice )
@@ -257,16 +257,73 @@ class DataSetFromYosys( DGLDataset ):
         print( "firstSlice:", firstSlice, "\nsecondSlice", secondSlice )
         if mode == 'train':
 	        self.graphPaths = listDir [ : firstSlice ]
-	        self.names      = allNames[ : firstSlice ]
+	        self.names      = self.allNames[ : firstSlice ]
         elif mode == 'valid':
 	        self.graphPaths = listDir [ firstSlice: secondSlice ]
-	        self.names      = allNames[ firstSlice: secondSlice ]
+	        self.names      = self.allNames[ firstSlice: secondSlice ]
         elif mode == 'test':
 	        self.graphPaths = listDir [ secondSlice : ]
-	        self.names      = allNames[ secondSlice : ]
+	        self.names      = self.allNames[ secondSlice : ]
 
         super().__init__( name='mydata_from_yosys_'+mode )
 
+    def drawCorrelationMatrices( self ):
+        num_graphs = len( self.graphs )
+        num_rows = int( np.sqrt( num_graphs ) )
+        num_cols = int( np.ceil( num_graphs / num_rows ) )
+
+        fig, axes = plt.subplots( num_rows, num_cols, figsize = ( 12, 8 ) )
+        for i, graph in enumerate( self.graphs ):
+            tensor = graph.ndata[ featName ]
+            print( "feat :", graph.ndata[ featName ].shape, graph.ndata[ featName ] )
+            print( "label:", graph.ndata[ labelName ].shape, graph.ndata[ labelName ] )
+            reshape = graph.ndata[ labelName ].view( -1, 1 )
+            print( "reshape:", reshape.shape, reshape )
+            tensor = torch.cat( ( tensor, reshape ), 1 )
+            print( "\n\ntensor to make matrix correlation:", tensor.shape, tensor )
+            correlation_matrix = np.corrcoef( tensor, rowvar = False )
+            row = i // num_cols
+            col = i % num_cols
+            ax = axes[row, col]
+            im = ax.imshow( correlation_matrix, cmap = 'viridis', interpolation = 'nearest', vmin=-1, vmax=1, )
+            ax.set_title(  self.names[i] )
+            ax.set_xticks( np.arange( len( self.namesOfFeatures ) +1 ) ) 
+            ax.set_yticks( np.arange( len( self.namesOfFeatures ) +1 ) )
+            ax.set_xticklabels( self.namesOfFeatures + [ labelName ], rotation = 30 )
+            ax.set_yticklabels( self.namesOfFeatures + [ labelName ] )
+            for j in range( len( self.namesOfFeatures ) +1 ):
+                for k in range( len( self.namesOfFeatures ) +1 ):
+                    ax.text(k, j, format( correlation_matrix[j, k], ".1f" ),
+                            ha = "center", va = "center", color = "white" )
+        fig.tight_layout()
+        cbar = fig.colorbar( im, ax=axes.ravel().tolist() )
+        plt.savefig( "correlation-individual.png" )
+        plt.close( 'all' )
+        plt.clf()
+
+
+        # # concatenated_tensor = np.hstack( [ graph.ndata[ featName ].T for graph in self.graphs ] )
+        # tensors = [graph.ndata[featName] for graph in self.graphs]
+        # num_features = tensors[0].shape[1]
+        # print( "num_features:", num_features )
+        # # concatenated_tensor = np.hstack(tensors)
+        # # correlation_matrix = np.corrcoef( concatenated_tensor, rowvar = False )
+        # concatenated_tensor = torch.cat( tensors, dim=1)
+        # transposed_tensor = concatenated_tensor.T
+        # correlation_coefficient = torch.corrcoef( transposed_tensor[0], transposed_tensor[1] )[0, 1]
+        # plt.imshow( correlation_matrix, cmap = 'viridis', interpolation = 'nearest' )
+        # plt.colorbar()
+        # plt.title( "Combined Correlation Matrix" )
+        # plt.xticks(np.arange(len(self.namesOfFeatures) * len(self.graphs)), self.namesOfFeatures * len(self.graphs), rotation=45, ha='right')
+        # plt.yticks(np.arange(len(self.namesOfFeatures) * len(self.graphs)), self.namesOfFeatures * len(self.graphs))
+        # for i in range(len(self.namesOfFeatures) * len(self.graphs)):
+        #     for j in range(len(self.namesOfFeatures) * len(self.graphs)):
+        #         plt.text(j, i, format(correlation_matrix[i, j], ".2f"),
+        #                  ha="center", va="center", color="white")
+        # plt.savefig( "correlation-combined.png" )
+        # plt.close( 'all' )
+        # plt.clf()
+        
     def process( self ):
         for path in self.graphPaths:
 	        graph = self._process_single( path )
@@ -319,6 +376,8 @@ class DataSetFromYosys( DGLDataset ):
         # self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ self.ablationFeatures ].values )
         if rawFeatName in self.ablationFeatures:
             self.graph.ndata[ featName ] =  torch.tensor( nodes_data[ rawFeatName ].values )
+            if rawFeatName not in self.namesOfFeatures:
+                self.namesOfFeatures.append( rawFeatName )
         self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
             
@@ -355,6 +414,8 @@ class DataSetFromYosys( DGLDataset ):
             normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in close_scores_list ] 
             close_tensor = torch.tensor( normalized_scores )
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, close_tensor )
+            if 'Closeness' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'Closeness' )
 
     ################### EIGENVECTOR  ################################################
         #drawGraph( self.graph, self.graph.name )
@@ -374,6 +435,8 @@ class DataSetFromYosys( DGLDataset ):
             normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in eigen_scores_list ] 
             eigen_tensor = torch.tensor( normalized_scores )
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, eigen_tensor )
+            if 'Eigen' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'Eigen' )
 
     ################### GROUP BETWEENNESS  ################################################
         #drawGraph( self.graph, self.graph.name )
@@ -409,6 +472,51 @@ class DataSetFromYosys( DGLDataset ):
             normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in group_betweenness_list ] 
             between_tensor = torch.tensor( normalized_scores )
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, between_tensor )
+            if 'Betweenness' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'Betweenness' )
+    ################### PAGE RANK ################################################    
+        if 'pageRank' in self.ablationFeatures:
+            nx_graph = self.graph.to_networkx()
+            pagerank_scores = nx.pagerank(nx_graph)
+            pagerank_scores_list = list( pagerank_scores.values() )
+            min_score = min( pagerank_scores_list )
+            max_score = max( pagerank_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in pagerank_scores_list ] 
+            pagerank_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, pagerank_tensor )
+            if 'PageRank' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'PageRank' )
+    ################### IN DEGREE ################################################    
+        if 'inDegree' in self.ablationFeatures:
+            nx_graph = self.graph.to_networkx()
+            inDegree_scores = nx.in_degree_centrality(nx_graph)
+            inDegree_scores_list = list( inDegree_scores.values() )
+            min_score = min( inDegree_scores_list )
+            max_score = max( inDegree_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in inDegree_scores_list ] 
+            inDegree_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, inDegree_tensor )
+            if 'inDegree' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'inDegree' )
+    ################### OUT DEGREE ################################################    
+        if 'outDegree' in self.ablationFeatures:
+            nx_graph = self.graph.to_networkx()
+            outDegree_scores = nx.out_degree_centrality(nx_graph)
+            outDegree_scores_list = list( outDegree_scores.values() )
+            min_score = min( outDegree_scores_list )
+            max_score = max( outDegree_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in outDegree_scores_list ] 
+            outDegree_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, outDegree_tensor )
+            if 'outDegree' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'outDegree' )
+    ###################################################################
+        if SELF_LOOP:
+            self.graph = dgl.add_self_loop( self.graph )           
+        print( "self.ablationFeatures (_process_single):", type( self.ablationFeatures ), len( self.ablationFeatures ), self.ablationFeatures )
+        print( "---> _process_single DONE.\n\tself.graph.ndata", type( self.graph.ndata ),"\n", self.graph.ndata, flush = True )
+        return self.graph
+    
     # ###################### LOGIC DEPTH #####################################
     #     #drawGraph( self.graph, "afterRemove_" + self.graph.name )
     #     def is_acyclic(graph):
@@ -461,34 +569,8 @@ class DataSetFromYosys( DGLDataset ):
     #                     if depths[pred_node] >= depth + 1:
     #                         continue
     #                     stack.append((pred_node, depth + 1))
-
     #         self.graph.ndata[featName] = dynamicConcatenate(self.graph.ndata, torch.tensor(depths))
 
-    ################### PAGE RANK ################################################    
-        if 'pageRank' in self.ablationFeatures:
-            nx_graph = self.graph.to_networkx()
-            pagerank_scores = nx.pagerank(nx_graph)
-            pagerank_scores_list = list( pagerank_scores.values() )
-            min_score = min( pagerank_scores_list )
-            max_score = max( pagerank_scores_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in pagerank_scores_list ] 
-            pagerank_tensor = torch.tensor( normalized_scores )
-            self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, pagerank_tensor )
-            
-            # ndata_tensor = self.graph.ndata[ 'pageRank' ]
-            # ndata_array = ndata_tensor.numpy()
-            # # Convert the array to a DataFrame
-            # df = pd.DataFrame( ndata_array )
-            # csv_file = "temp/" + self.graph.name + "pageRank.csv"
-            # df.to_csv( csv_file, index = False )
-            
-    ###################################################################
-        if SELF_LOOP:
-            self.graph = dgl.add_self_loop( self.graph )
-        print( "self.ablationFeatures (_process_single):", type( self.ablationFeatures ), len( self.ablationFeatures ), self.ablationFeatures )
-        print( "---> _process_single DONE.\n\tself.graph.ndata", type( self.graph.ndata ),"\n", self.graph.ndata, flush = True )
-
-        return self.graph
            
     def __getitem__( self, i ):
         return self.graphs[i]
@@ -511,6 +593,19 @@ class DataSetFromYosys( DGLDataset ):
 
     def getNames( self ):
 	    return self.names
+
+    def appendGraph( self, inDataSet ):
+        self.graphPaths += inDataSet.graphPaths
+        self.graphs     += inDataSet.graphs
+        self.names      += inDataSet.names
+        self.allNames   += inDataSet.allNames
+        # self.graphPaths.append( inDataSet.graphPaths )
+        # self.graphs.append( inDataSet.graphs )
+        # self.names.append( inDataSet.names )
+        # self.allNames.append( inDataSet.allNames )
+        self.mode = "complete_dataset"
+        if self.ablationFeatures != inDataSet.ablationFeatures:
+            print( "ERROR! unexpected ablation list!!" )
         
 
 
@@ -527,6 +622,8 @@ def drawGraph( graph, graphName ):
     nx.draw( nx_G, pos, with_labels = True, node_color = [ [ .7, .7, .7 ] ] )
     #	plt.show()
     plt.savefig( graphName )
+    plt.close( 'all' )
+    plt.clf()
 
 #    print("len graph.ndata:",len(graph.ndata))
 #    print("type graph.ndata:",type(graph.ndata))
@@ -539,8 +636,7 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     print( "predict:", type( tensorPredict ), tensorPredict.shape )
 
     predict_normalized = ( tensorPredict - tensorPredict.min() ) / ( tensorPredict.max() - tensorPredict.min() )
-    label_normalized   = tensorLabel #( tensorLabel - tensorLabel.min()) / ( tensorLabel.max() - tensorLabel.min() )
-    
+    label_normalized   = tensorLabel #( tensorLabel - tensorLabel.min()) / ( tensorLabel.max() - tensorLabel.min() )    
     plt.close( 'all' )
     plt.clf()
 
@@ -1029,8 +1125,9 @@ if __name__ == '__main__':
     df = df.drop( df.index[ df[ labelName ] < 0 ] )
     df.hist( bins = 50, figsize = (15,12) )
     plt.savefig( "BeforePreProcess-train+valid+test" )
-
-
+    plt.close( 'all' )
+    plt.clf()
+    
     preProcessData( listDir )
 	            
     writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
@@ -1043,10 +1140,8 @@ if __name__ == '__main__':
     df = df.drop( df.index[ df[ rawFeatName ] < 0 ] )
     df.hist( bins = 50, figsize = (15,12) )
     plt.savefig( "AfterPreProcess-train+valid+test" )
-
-    #df.plot( kind = "scatter",  x = "placementHeat", y = "type" )
-    #    df.plot.area( figsize = (15,12), subplots = True )
-    #    .savefig( "scatterPlacement" )
+    plt.close( 'all' )
+    plt.clf()
     ##################################################################################
     ##################################################################################
     ##################################################################################
@@ -1054,9 +1149,12 @@ if __name__ == '__main__':
 
     if not DOLEARN:
         sys.exit()
+        
     summary = "runSummary.csv"
     with open( summary, 'w' ) as f:
         f.write("")
+    if os.path.exists( "runs" ):
+        shutil.rmtree( "runs" )
     split = [ 0.9, 0.05, 0.05 ]
     print( ">>>>>> listDir:" )
     for index in range(len(listDir)):
@@ -1072,7 +1170,8 @@ if __name__ == '__main__':
         print( "##################################################################################" )
         print( "mainIteration:", mainIteration )
         # ablationList = [('eigen',), ('eigen','type'), ('eigen','pageRank'), ('eigen','pageRank','type')]
-        ablationList = [ ('eigen','pageRank','type') ]       
+        # ablationList = [ ('eigen','pageRank','type') ]
+        ablationList = [ ('inDegree','outDegree','eigen','pageRank','type') ]       
         print( "--> combination_list:", len( ablationList ), ablationList )
         for ablationIter in ablationList:
             with open( summary, 'a' ) as f:
@@ -1086,8 +1185,6 @@ if __name__ == '__main__':
                 f.write( "\ntestIndex,validIndex,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
             print( "ablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, flush = True )
             ablationIter = list( ablationIter )
-            if os.path.exists( "runs" ):
-                shutil.rmtree( "runs" )
             if os.path.exists( imageOutput ):
                 shutil.rmtree( imageOutput )
             os.makedirs( imageOutput )
@@ -1124,6 +1221,12 @@ if __name__ == '__main__':
                     train_dataset = DataSetFromYosys( currentDir, split, ablationIter, mode='train' )
                     val_dataset   = DataSetFromYosys( currentDir, split, ablationIter, mode='valid' )
                     test_dataset  = DataSetFromYosys( currentDir, split, ablationIter, mode='test'  )
+
+                    complete_dataset = train_dataset
+                    complete_dataset.appendGraph( val_dataset )
+                    complete_dataset.appendGraph( test_dataset )
+                    complete_dataset.drawCorrelationMatrices()
+                    del complete_dataset
                     features = train_dataset[0].ndata[ featName ]      
                     if( features.dim() == 1 ):
                         features = features.unsqueeze(1)
@@ -1181,7 +1284,7 @@ if __name__ == '__main__':
                     print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
 
                     writerName =  "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) )
-                    writerName += "- " + str( ablationIter ) + "-" + mainIteration
+                    writerName += "- " + str( ablationIter ) + "-" + str( mainIteration )
                     writerName += " -V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
                     finalEpoch, maxMem, accMem = train( train_dataloader, val_dataloader, device, model, writerName )
                     finalEpoch += 1
