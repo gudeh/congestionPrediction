@@ -66,8 +66,8 @@ step      = 0.005
 accumulation_steps = 4
 
 
-DEBUG         = 1 #1 for evaluation inside train
-DRAWOUTPUTS   = True
+DEBUG         = 0 #1 for evaluation inside train
+DRAWOUTPUTS   = False
 CUDA          = True
 DOLEARN       = True
 SKIPFINALEVAL = False #TODO True
@@ -1151,8 +1151,11 @@ if __name__ == '__main__':
         sys.exit()
         
     summary = "runSummary.csv"
+    ablationResult = "ablationResult.csv"
     with open( summary, 'w' ) as f:
         f.write("")
+    with open( ablationResult, 'w' ) as f:
+        f.write( "Featuers,Train,Validation,Test\n,Mean,SD,Mean,SD,Mean,SD\n" ) 
     if os.path.exists( "runs" ):
         shutil.rmtree( "runs" )
     split = [ 0.9, 0.05, 0.05 ]
@@ -1171,7 +1174,11 @@ if __name__ == '__main__':
         print( "mainIteration:", mainIteration )
         # ablationList = [('eigen',), ('eigen','type'), ('eigen','pageRank'), ('eigen','pageRank','type')]
         # ablationList = [ ('eigen','pageRank','type') ]
-        ablationList = [ ('inDegree','outDegree','eigen','pageRank','type') ]       
+        # ablationList = [ ('inDegree','outDegree','eigen','pageRank','type') ]
+        ablationList =  [ ('inDegree',), ( 'outDegree',), ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
+        ablationList += [ ('outDegree','eigen','pageRank'), ('inDegree','eigen','pageRank'), ('inDegree','pageRank'), ('outDegree','pageRank') ]
+        ablationList += [ ('inDegree','outDegree','eigen','pageRank'), ('inDegree','outDegree','eigen','pageRank','type'), ('type','eigen','pageRank'), ('eigen','pageRank') ]
+
         print( "--> combination_list:", len( ablationList ), ablationList )
         for ablationIter in ablationList:
             with open( summary, 'a' ) as f:
@@ -1183,6 +1190,8 @@ if __name__ == '__main__':
                 f.write( ",features: " ) 
                 f.write( "; ".join( ablationIter ) )
                 f.write( "\ntestIndex,validIndex,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
+            with open( ablationResult, 'a' ) as f:
+                f.write( "; ".join( ablationIter ) )
             print( "ablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, flush = True )
             ablationIter = list( ablationIter )
             if os.path.exists( imageOutput ):
@@ -1222,11 +1231,12 @@ if __name__ == '__main__':
                     val_dataset   = DataSetFromYosys( currentDir, split, ablationIter, mode='valid' )
                     test_dataset  = DataSetFromYosys( currentDir, split, ablationIter, mode='test'  )
 
-                    complete_dataset = train_dataset
-                    complete_dataset.appendGraph( val_dataset )
-                    complete_dataset.appendGraph( test_dataset )
-                    complete_dataset.drawCorrelationMatrices()
-                    del complete_dataset
+                    if DRAWOUTPUTS:
+                        complete_dataset = train_dataset
+                        complete_dataset.appendGraph( val_dataset )
+                        complete_dataset.appendGraph( test_dataset )
+                        complete_dataset.drawCorrelationMatrices()
+                        del complete_dataset
                     features = train_dataset[0].ndata[ featName ]      
                     if( features.dim() == 1 ):
                         features = features.unsqueeze(1)
@@ -1345,6 +1355,10 @@ if __name__ == '__main__':
             with open( summary, 'a' ) as f:
                 f.write( ",,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+str( sum( kendallValid ) / len( kendallValid ) )+","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
                 f.write( ",,,,,,,Median ," + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallValid ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
+            with open( ablationResult, 'a' ) as f:
+                f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( statistics.stdev( kendallTrain ) ) )
+                f.write( ","+ str( sum( kendallValid ) / len( kendallValid ) ) +","+ str( statistics.stdev( kendallValid ) ) )
+                f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ str( statistics.stdev( kendallTest  ) ) + "\n" )
 
             folder_name = f"{str(ablationIter)}_{mainIteration}"
             # os.mkdir( folder_name )
