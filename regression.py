@@ -4,6 +4,7 @@ import csv
 import re # handle type to category names AND_X1
 import time
 import math #ceil()
+import random
 import numpy as np
 import pandas as pd
 import statistics
@@ -59,10 +60,14 @@ rawFeatName = 'type' #TODO: change to listFeats[0]
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 500
-minEpochs = 150
+maxEpochs = 0
+minEpochs = 0
 useEarlyStop = True
 step      = 0.005
+improvement_threshold = 0.000001 
+patience = 40  # Number of epochs without improvement to stop training
+#split = [ 0.9, 0.05, 0.05 ]
+TandV = 2
 accumulation_steps = 4
 
 
@@ -225,10 +230,11 @@ def writeDFrameData( listDir, csvName, outName ):
 
 
 class DataSetFromYosys( DGLDataset ):
-    def __init__( self, listDir, split, ablationList, mode='train' ):    
-        if len( split ) != 3 or sum( split ) != 1.0:
-	        print("!!!!ERROR: fatal, unexpected split sizes." )
-	        return	        
+    def __init__( self, listDir, ablationList, mode='train' ):    
+        # if len( split ) != 3 or sum( split ) != 1.0:
+	#         print("!!!!ERROR: fatal, unexpected split sizes." )
+	#         return	       
+            
         self.graphPaths = []
         self.graphs = []
         self.names = []
@@ -241,17 +247,23 @@ class DataSetFromYosys( DGLDataset ):
             self.allNames.append( str( listDir[idx] ).rsplit( '/' )[-1] )
             print( self.allNames[idx],",", end="" )
     #        train, validate, test = np.split(files, [int(len(files)*0.8), int(len(files)*0.9)])
-        firstSlice  = math.ceil( len( listDir )*split[0] ) - 1
-        secondSlice = math.ceil( len( listDir )*split[1] + firstSlice )
+        # firstSlice  = math.ceil( len( listDir )*split[0] ) - 1
+        # secondSlice = math.ceil( len( listDir )*split[1] + firstSlice )
+        firstSlice  = 0
+        secondSlice = 0
         if( len( listDir ) == 1 ):
 	        firstSlice  = 0
 	        secondSlice = 0
         if( len( listDir ) == 2 ):
 	        firstSlice  = 1
 	        secondSlice = 1
-        if( len( listDir ) > 2 and len( listDir ) < 10 ):
-	        firstSlice  = -2
-	        secondSlice = -1
+        if( len( listDir ) > 2 ):
+            if TandV == 1:
+                firstSlice  = -2
+                secondSlice = -1
+            if TandV == 2:
+                firstSlice  = -3
+                secondSlice = -2
          
         print( "\nlen(listDir)",len(listDir), flush = True)
         print( "firstSlice:", firstSlice, "\nsecondSlice", secondSlice )
@@ -428,7 +440,7 @@ class DataSetFromYosys( DGLDataset ):
             # print( ".edges:\n", nx_graph.edges(data=True))
                    
             # eigen_scores = nx.eigenvector_centrality( nx_graph )
-            eigen_scores = nx.eigenvector_centrality_numpy( nx_graph, max_iter = 500 )
+            eigen_scores = nx.eigenvector_centrality_numpy( nx_graph, max_iter = 5000 )
             eigen_scores_list = list( eigen_scores.values() )
             min_score = min( eigen_scores_list )
             max_score = max( eigen_scores_list )
@@ -991,9 +1003,6 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
 ################### Early Stop loop ###########################
     best_loss = float('inf')  # Initialize the best training loss with a large value
     best_val_loss = float('inf')  # Initialize the best validation loss with a large value
-    improvement_threshold = 0.000001  # Set the threshold for improvement
-    patience = 30  # Number of epochs without improvement to stop training
-
     epochs_without_improvement = 0  # Counter for epochs without improvement
     val_epochs_without_improvement = 0  # Counter for validation epochs without improvement
     
@@ -1155,10 +1164,10 @@ if __name__ == '__main__':
     with open( summary, 'w' ) as f:
         f.write("")
     with open( ablationResult, 'w' ) as f:
-        f.write( "Featuers,Train,Validation,Test\n,Mean,SD,Mean,SD,Mean,SD\n" ) 
+        f.write( "Featuers,Train-Mean,Train-SD,Valid-Mean,Valid-SD,Test-Mean,Test-SD\n" ) 
     if os.path.exists( "runs" ):
         shutil.rmtree( "runs" )
-    split = [ 0.9, 0.05, 0.05 ]
+    
     print( ">>>>>> listDir:" )
     for index in range(len(listDir)):
         print("\tIndex:", index, "- Path:", listDir[index])
@@ -1167,7 +1176,7 @@ if __name__ == '__main__':
     # for combAux in range( 1, len( listFeats ) + 1 ):
     #     print( "combAux( iteration ):", combAux, ", MAX:", len( listFeats ) + 1 )
     #     ablationList = list( combinations( listFeats, combAux ) )
-    for mainIteration in range( 0, 4 ):
+    for mainIteration in range( 0, 1 ):
         print( "##################################################################################" )
         print( "########################## NEW MAIN RUN  ########################################" )
         print( "##################################################################################" )
@@ -1191,7 +1200,8 @@ if __name__ == '__main__':
                 f.write( "; ".join( ablationIter ) )
                 f.write( "\ntestIndex,validIndex,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
             with open( ablationResult, 'a' ) as f:
-                f.write( "; ".join( ablationIter ) )
+                copied_list = [s[:1].capitalize() for s in ablationIter]
+                f.write( "; ".join( copied_list ) )
             print( "ablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, flush = True )
             ablationIter = list( ablationIter )
             if os.path.exists( imageOutput ):
@@ -1208,28 +1218,57 @@ if __name__ == '__main__':
             kendallTest =  []
             kendallValid = []
             kendallTrain = []
-            for testIndex in [ 7 ]: #0-aes, 4-dynamic, 7-swerv
-                for validIndex in range( len( listDir ) ):
-                # for validIndex in [ 0 ]: # for testing only
-                    if testIndex == validIndex:
+
+            if TandV == 1:
+                testIterable  = [ 7 ]
+                validIterable = list( range( 0, len( listDir ) ) )
+            if TandV == 2:
+                testIterable  = list( range( 0, len( listDir ) -1, 2 ) )
+                # validIterable = random.sample( range( len( listDir ) ), int( len( listDir ) / 2 ) )
+                validIterable = list( range( 0, len( listDir ) ) )
+            # for testIndex in [ 7 ]:
+            # for testIndex in range( 0, len( listDir ), 2 ):
+            #     for validIndex in range( 0, len( listDir ) ):
+            print( "testIterable:", testIterable )
+            print( "validIterable:", validIterable )
+            for testIndex in testIterable:
+                for validIndex in validIterable:
+                    if TandV == 1:
+                        if testIndex == validIndex:
+                            continue
+                    if TandV == 2 and testIndex +1 == validIndex and testIndex == validIndex:
                         continue
+                        # while validIndex == testIndex or validIndex == testIndex+1 or validIndex in validIterable:
+                        #     validIndex = random.randint( 0, len( listDir ) -1)
+                        # print( "new validIndex:", validIndex )
+                        
                     startIterationTime = time.time()
                     print( "##################################################################################" )
                     print( "#################### New CrossValid iteration  ###################################" )
                     print( "##################################################################################" )
                     currentDir = listDir.copy()
 
-                    auxString = currentDir[ -1 ]
-                    currentDir[ -1 ] = currentDir[ testIndex ]
-                    currentDir[ testIndex ] = auxString
-
-                    auxString = currentDir[ -2 ]
-                    currentDir[ -2 ] = currentDir[ validIndex]
-                    currentDir[ validIndex] = auxString
-
-                    train_dataset = DataSetFromYosys( currentDir, split, ablationIter, mode='train' )
-                    val_dataset   = DataSetFromYosys( currentDir, split, ablationIter, mode='valid' )
-                    test_dataset  = DataSetFromYosys( currentDir, split, ablationIter, mode='test'  )
+                    if TandV == 1:
+                        auxString1 = currentDir[ -1 ]
+                        auxString2 = currentDir[ -2 ]
+                        currentDir[ -1 ] = currentDir[ testIndex ]
+                        currentDir[ -2 ] = currentDir[ validIndex]
+                        currentDir[ testIndex ] = auxString1
+                        currentDir[ validIndex] = auxString2
+                    if TandV == 2:
+                        auxString1 = currentDir[ -1 ]
+                        auxString2 = currentDir[ -2 ]
+                        auxString3 = currentDir[ -3 ]
+                        currentDir[ -1 ] = currentDir[ testIndex    ]
+                        currentDir[ -2 ] = currentDir[ testIndex +1 ]
+                        currentDir[ -3 ] = currentDir[ validIndex   ]
+                        currentDir[ testIndex    ] = auxString1
+                        currentDir[ testIndex +1 ] = auxString2
+                        currentDir[ validIndex   ] = auxString3                        
+                        
+                    train_dataset = DataSetFromYosys( currentDir, ablationIter, mode='train' )
+                    val_dataset   = DataSetFromYosys( currentDir, ablationIter, mode='valid' )
+                    test_dataset  = DataSetFromYosys( currentDir, ablationIter, mode='test'  )
 
                     if DRAWOUTPUTS:
                         complete_dataset = train_dataset
@@ -1339,9 +1378,10 @@ if __name__ == '__main__':
                     kendallTest.append ( test_kendall.item()  )
                     kendallValid.append( valid_kendall.item() )
                     kendallTrain.append( train_kendall.item() )
+                    print( "val_dataset.getNames()", val_dataset.getNames(), "test_dataset.getNames()", test_dataset.getNames() )
                     with open( summary, 'a' ) as f:
                         f.write( str( testIndex ) + ","+str( validIndex )+","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( accMem / finalEpoch )+"," )
-                        f.write( val_dataset.getNames()[0] +","+ test_dataset.getNames()[0] +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() ))
+                        f.write( ";".join(map(str, val_dataset.getNames() ) ) +","+ ";".join(map(str, test_dataset.getNames() ) ) +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() ))
                         f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() ) )  #+"\n")
                         f.write( "," + str( train_f1.item() ) +","+ str( valid_f1.item() ) +","+ str( test_f1.item() )  +"\n")
 
