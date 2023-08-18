@@ -60,14 +60,14 @@ rawFeatName = 'type' #TODO: change to listFeats[0]
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 0
-minEpochs = 0
+maxEpochs = 300
+minEpochs = 100
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
 patience = 40  # Number of epochs without improvement to stop training
 #split = [ 0.9, 0.05, 0.05 ]
-TandV = 2
+TandV = 1
 accumulation_steps = 4
 
 
@@ -1236,7 +1236,7 @@ if __name__ == '__main__':
                     if TandV == 1:
                         if testIndex == validIndex:
                             continue
-                    if TandV == 2 and testIndex +1 == validIndex and testIndex == validIndex:
+                    if TandV == 2 and ( testIndex +1 == validIndex or testIndex == validIndex ):
                         continue
                         # while validIndex == testIndex or validIndex == testIndex+1 or validIndex in validIterable:
                         #     validIndex = random.randint( 0, len( listDir ) -1)
