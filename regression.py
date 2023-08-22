@@ -47,11 +47,11 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 #    d2_pinball_score
 #    d2_absolute_error_score
 
-#print( "torch.cuda.is_available():", torch.cuda.is_available() )
-#print( "torch.cuda.device_count():", torch.cuda.device_count() )
-#print( "torch.cuda.device(0):", torch.cuda.device(0) )
-#print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
-#print( "dgl.__version_:", dgl.__version__ )
+print( "torch.cuda.is_available():", torch.cuda.is_available() )
+print( "torch.cuda.device_count():", torch.cuda.device_count() )
+print( "torch.cuda.device(0):", torch.cuda.device(0) )
+print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
+print( "dgl.__version_:", dgl.__version__ )
 
 listFeats = [ 'inDegree', 'outDegree', 'eigen', 'type', 'pageRank', ] #, 'closeness', 'between' ] # logicDepth
 featName = 'feat' #listFeats[0]
@@ -75,7 +75,9 @@ DEBUG         = 0 #1 for evaluation inside train
 DRAWOUTPUTS   = False
 CUDA          = True
 DOLEARN       = True
+FULLTRAIN     = True
 SKIPFINALEVAL = False #TODO True
+ALLABLATION   = True
 
 
 SELF_LOOP = True
@@ -248,7 +250,7 @@ class DataSetFromYosys( DGLDataset ):
             print( self.allNames[idx],",", end="" )
     #        train, validate, test = np.split(files, [int(len(files)*0.8), int(len(files)*0.9)])
         # firstSlice  = math.ceil( len( listDir )*split[0] ) - 1
-        # secondSlice = math.ceil( len( listDir )*split[1] + firstSlice )
+        # secondSlice = math.ceil( len( listDir )*split[1] + firstSlice )      
         firstSlice  = 0
         secondSlice = 0
         if( len( listDir ) == 1 ):
@@ -268,14 +270,19 @@ class DataSetFromYosys( DGLDataset ):
         print( "\nlen(listDir)",len(listDir), flush = True)
         print( "firstSlice:", firstSlice, "\nsecondSlice", secondSlice )
         if mode == 'train':
-	        self.graphPaths = listDir [ : firstSlice ]
-	        self.names      = self.allNames[ : firstSlice ]
+            if FULLTRAIN:
+                print("all dataset as train!")
+                self.graphPaths = listDir
+                self.names      = self.allNames
+            else:
+                self.graphPaths = listDir [ : firstSlice ]
+                self.names      = self.allNames[ : firstSlice ]
         elif mode == 'valid':
-	        self.graphPaths = listDir [ firstSlice: secondSlice ]
-	        self.names      = self.allNames[ firstSlice: secondSlice ]
+            self.graphPaths = listDir [ firstSlice: secondSlice ]
+            self.names      = self.allNames[ firstSlice: secondSlice ]
         elif mode == 'test':
-	        self.graphPaths = listDir [ secondSlice : ]
-	        self.names      = self.allNames[ secondSlice : ]
+            self.graphPaths = listDir [ secondSlice : ]
+            self.names      = self.allNames[ secondSlice : ]
 
         super().__init__( name='mydata_from_yosys_'+mode )
 
@@ -522,6 +529,18 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, outDegree_tensor )
             if 'outDegree' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'outDegree' )
+    ################### KATZ ################################################    
+        if 'katz' in self.ablationFeatures:
+            nx_graph = self.graph.to_networkx()
+            katz_scores = nx.katz_centrality(nx_graph)
+            katz_scores_list = list( katz_scores.values() )
+            min_score = min( katz_scores_list )
+            max_score = max( katz_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in katz_scores_list ] 
+            katz_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, katz_tensor )
+            if 'katz' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'katz' )
     ###################################################################
         if SELF_LOOP:
             self.graph = dgl.add_self_loop( self.graph )           
@@ -990,7 +1009,8 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
     print( "device in train:", device )
     writer = SummaryWriter( comment = writerName )
 
-    torch.cuda.reset_max_memory_allocated()
+#    torch.cuda.reset_max_memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
     accumulated_memory_usage = 0
     max_memory_usage = 0
     
@@ -1173,22 +1193,26 @@ if __name__ == '__main__':
         print("\tIndex:", index, "- Path:", listDir[index])
 
 
-    # for combAux in range( 1, len( listFeats ) + 1 ):
-    #     print( "combAux( iteration ):", combAux, ", MAX:", len( listFeats ) + 1 )
-    #     ablationList = list( combinations( listFeats, combAux ) )
+    if ALLABLATION:
+        for combAux in range( 1, len( listFeats ) + 1 ):
+            print( "combAux( iteration ):", combAux, ", MAX:", len( listFeats ) + 1 )
+            ablationList = list( combinations( listFeats, combAux ) )
+    else:
+        # ablationList = [('eigen',), ('eigen','type'), ('eigen','pageRank'), ('eigen','pageRank','type')]
+        # ablationList = [ ('eigen','pageRank','type') ]
+        # ablationList = [ ('inDegree','outDegree','eigen','pageRank','type') ]
+        ablationList =  [ ('katz',), ('eigen',), ('pagerank',), ('inDegree',), ( 'outDegree',), ('type',) ]
+        ablationList += [ ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
+        ablationList += [ ('outDegree','eigen','pageRank'), ('inDegree','eigen','pageRank'), ('inDegree','pageRank'), ('outDegree','pageRank') ]
+        ablationList += [ ('inDegree','outDegree','eigen','pageRank'), ('inDegree','outDegree','eigen','pageRank','type'), ('type','eigen','pageRank'), ('eigen','pageRank') ]
+        
     for mainIteration in range( 0, 1 ):
         print( "##################################################################################" )
         print( "########################## NEW MAIN RUN  ########################################" )
         print( "##################################################################################" )
         print( "mainIteration:", mainIteration )
-        # ablationList = [('eigen',), ('eigen','type'), ('eigen','pageRank'), ('eigen','pageRank','type')]
-        # ablationList = [ ('eigen','pageRank','type') ]
-        # ablationList = [ ('inDegree','outDegree','eigen','pageRank','type') ]
-        ablationList =  [ ('inDegree',), ( 'outDegree',), ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
-        ablationList += [ ('outDegree','eigen','pageRank'), ('inDegree','eigen','pageRank'), ('inDegree','pageRank'), ('outDegree','pageRank') ]
-        ablationList += [ ('inDegree','outDegree','eigen','pageRank'), ('inDegree','outDegree','eigen','pageRank','type'), ('type','eigen','pageRank'), ('eigen','pageRank') ]
-
         print( "--> combination_list:", len( ablationList ), ablationList )
+        ablationKendalls = []
         for ablationIter in ablationList:
             with open( summary, 'a' ) as f:
                 f.write( "#Circuits:" + str( len( listDir ) ) )
@@ -1304,7 +1328,6 @@ if __name__ == '__main__':
                     val_sampler = torch.utils.data.SequentialSampler(val_dataset)  # Iterate through the validation dataset sequentially
                     test_sampler = torch.utils.data.SequentialSampler(test_dataset)  # Iterate through the test dataset sequentially
 
-
                     train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )#5 , sampler = train_sampler )
                     val_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
                     test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
@@ -1341,36 +1364,40 @@ if __name__ == '__main__':
                     print( '######################\n## Final Evaluation ##\n######################\n' )
                     startTimeEval = time.time()
                     if not SKIPFINALEVAL:
-                        for k in range( len( train_dataset ) ):
-                            g = train_dataset[k].to( device )
-                            path = train_dataset.names[k]
-                            path = imageOutput + "/train-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex) +"e"+str(finalEpoch)
-                            print( "))))))) executing single evaluation on ", path, "-", k )
-                            train_kendall, train_r2, train_f1 = evaluate_single( g, device, model, path )
-                            print( "Single Train Kendall {:.4f}".format( train_kendall ) )
-                            print( "Single Train R2 {:.4f}".format( train_r2 ) )
-                            print( "Single Train f1 {:.4f}".format( train_f1 ) )
-
-                        g = val_dataset[0].to( device )
-                        path = val_dataset.names[0]
-                        path = imageOutput + "/valid-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex)+"e"+str(finalEpoch)
-                        valid_kendall, valid_r2, valid_f1 = evaluate_single( g, device, model, path )
-                        print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
-                        print( "Single valid R2 {:.4f}".format( valid_r2 ) )
-                        print( "Single valid f1 {:.4f}".format( valid_f1 ) )
-
-                        g = test_dataset[0].to( device )
-                        path = test_dataset.names[0]
-                        path = imageOutput + "/test-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex)+"e"+str(finalEpoch)
-                        test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
-
+                        # for k in range( len( train_dataset ) ):
+                        #     g = train_dataset[k].to( device )
+                        #     path = train_dataset.names[k]
+                        #     path = imageOutput + "/train-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex) +"e"+str(finalEpoch)
+                        #     print( "))))))) executing single evaluation on ", path, "-", k )
+                        #     train_kendall, train_r2, train_f1 = evaluate_single( g, device, model, path )
+                        #     print( "Single Train Kendall {:.4f}".format( train_kendall ) )
+                        #     print( "Single Train R2 {:.4f}".format( train_r2 ) )
+                        #     print( "Single Train f1 {:.4f}".format( train_f1 ) )
+                        if not FULLTRAIN:
+                            g = val_dataset[0].to( device )
+                            path = val_dataset.names[0]
+                            path = imageOutput + "/valid-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex)+"e"+str(finalEpoch)
+                            valid_kendall, valid_r2, valid_f1 = evaluate_single( g, device, model, path )
+                            print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
+                            print( "Single valid R2 {:.4f}".format( valid_r2 ) )
+                            print( "Single valid f1 {:.4f}".format( valid_f1 ) )
+                        
+                            g = test_dataset[0].to( device )
+                            path = test_dataset.names[0]
+                            path = imageOutput + "/test-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex)+"e"+str(finalEpoch)
+                            test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
+                            print( "Single test Kendall {:.4f}".format( test_kendall ) )
+                            print( "Single test R2 {:.4f}".format( test_r2 ) )
+                            print( "Single test f1 {:.4f}".format( test_f1 ) )
+                        else:
+                            test_kendall= test_r2= test_f1= valid_kendall= valid_r2= valid_f1= torch.tensor([0])
                         train_kendall, train_r2, train_f1 = evaluate_in_batches( train_dataloader, device, model )
                         print( "Total Train Kendall {:.4f}".format( train_kendall ) )
                         print( "Total Train R2 {:.4f}".format( train_r2 ) )
                         print( "Total Train f1 {:.4f}".format( train_f1 ) )
 
                     else:
-                        test_kendall= test_r2= test_f1= train_kendall= train_r2= train_f1=0.0
+                        test_kendall= test_r2= test_f1= train_kendall= train_r2= train_f1= valid_kendall= valid_r2= valid_f1= torch.tensor([0])
                     print( "\n###############################\n## FinalEvalRuntime:", round( ( time.time() - startTimeEval ) / 60, 1) , "min ##\n###############################\n" )
                     iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
                     print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n" )
@@ -1392,21 +1419,24 @@ if __name__ == '__main__':
                     del train_dataloader
                     del val_dataloader
                     del test_dataloader
+                    if FULLTRAIN:
+                        break
+                        break
             with open( summary, 'a' ) as f:
                 f.write( ",,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+str( sum( kendallValid ) / len( kendallValid ) )+","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
                 f.write( ",,,,,,,Median ," + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallValid ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
             with open( ablationResult, 'a' ) as f:
-                f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( statistics.stdev( kendallTrain ) ) )
-                f.write( ","+ str( sum( kendallValid ) / len( kendallValid ) ) +","+ str( statistics.stdev( kendallValid ) ) )
-                f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ str( statistics.stdev( kendallTest  ) ) + "\n" )
+                f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") )
+                f.write( ","+ str( sum( kendallValid ) / len( kendallValid ) ) +","+ (str(statistics.stdev(kendallValid)) if len(kendallValid) > 1 else "N/A") )
+                f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n" )
 
-            folder_name = f"{str(ablationIter)}_{mainIteration}"
+            folder_name = f"{str(ablationIter)}-{mainIteration}"
             # os.mkdir( folder_name )
             # shutil.move( "runs", os.path.join( folder_name, "runs" ) )
             # shutil.move( "image_outputs", os.path.join( folder_name, "image_outputs" ) )
             shutil.move( "image_outputs", folder_name )
-            
-                
+        with open( ablationResult, 'a' ) as f:
+            f.writea("\n")
     endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 1 )
     with open( summary, 'a' ) as f:
         f.write( ",,," + str( endTimeAll ) + " hours" ) 
