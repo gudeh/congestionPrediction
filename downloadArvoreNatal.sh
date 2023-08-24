@@ -1,6 +1,6 @@
 #!/bin/bash
 
-remote_host="ecl@150.162.57.235"
+remote_host="ecl@150.162.57.???"
 remote_dir="~/1augusto/"
 local_dir="download"
 
