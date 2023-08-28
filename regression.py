@@ -37,31 +37,22 @@ import networkx as nx #drawing graphs
 from sklearn.metrics import r2_score, f1_score #Score metric
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-
-#regression metrics:  https://scikit-learn.org/stable/modules/model_evaluation.html#regression-metrics
-#    mean_squared_error
-#    mean_absolute_error
-#    r2_score
-#    explained_variance_score
-#    mean_pinball_loss
-#    d2_pinball_score
-#    d2_absolute_error_score
-
 print( "torch.cuda.is_available():", torch.cuda.is_available() )
 print( "torch.cuda.device_count():", torch.cuda.device_count() )
 print( "torch.cuda.device(0):", torch.cuda.device(0) )
 print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 print( "dgl.__version_:", dgl.__version__ )
 
-listFeats = [ 'inDegree', 'outDegree', 'eigen', 'type', 'pageRank', ] #, 'closeness', 'between' ] # logicDepth
+MANUALABLATION   = False
+listFeats = [ 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type' ] #, 'closeness', 'between' ] # logicDepth
 featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 300
-minEpochs = 100
+maxEpochs = 250
+minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
@@ -70,19 +61,16 @@ patience = 40  # Number of epochs without improvement to stop training
 TandV = 1
 accumulation_steps = 4
 
-
 DEBUG         = 0 #1 for evaluation inside train
 DRAWOUTPUTS   = False
 CUDA          = True
 DOLEARN       = True
 FULLTRAIN     = True
 SKIPFINALEVAL = False #TODO True
-ALLABLATION   = True
 
 
 SELF_LOOP = True
 COLAB     = False
-
 
 
 def getF1( tp, tn, fp, fn ):
@@ -361,11 +349,11 @@ class DataSetFromYosys( DGLDataset ):
         edges_src  = torch.from_numpy( edges_data['Src'].to_numpy() )
         edges_dst  = torch.from_numpy( edges_data['Dst'].to_numpy() )
 
-        print( "BEFORE MERGE nodes_data:", nodes_data.shape, "\n", nodes_data )
+        print( "BEFORE MERGE nodes_data:", nodes_data.shape )#, "\n", nodes_data )
         nodes_data = pd.merge( nodes_data, positions, on = "name" )
-        print( "AFTER MERGE nodes_data:", nodes_data.shape, "\n", nodes_data )
+        print( "AFTER MERGE nodes_data:", nodes_data.shape )#, "\n", nodes_data )
         
-        print( "self.ablationFeatures:", type( self.ablationFeatures ), "\n", self.ablationFeatures )
+        print( "self.ablationFeatures:", type( self.ablationFeatures ) )#, "\n", self.ablationFeatures )
 
         for column in self.ablationFeatures:
             if column not in nodes_data:
@@ -384,9 +372,9 @@ class DataSetFromYosys( DGLDataset ):
     #		print( "df_wanted:", df_wanted.shape, "\n", df_wanted )
         removedNodesMask = torch.tensor( df_wanted )
     #		print( "removedNodesMask:", removedNodesMask.shape )#, "\n", removedNodesMask )
-        print( "nodes_data:", type( nodes_data ), nodes_data.shape, "\n", nodes_data )
+        print( "nodes_data:", type( nodes_data ), nodes_data.shape ) #, "\n", nodes_data )
         idsToRemove = torch.tensor( nodes_data.index )[ removedNodesMask ]
-        print( "idsToRemove:", idsToRemove.shape ,"\n", torch.sort( idsToRemove ) )
+        print( "idsToRemove:", idsToRemove.shape ) #,"\n", torch.sort( idsToRemove ) )
 
     ###################### BUILD GRAPH #####################################        
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
@@ -399,7 +387,6 @@ class DataSetFromYosys( DGLDataset ):
                 self.namesOfFeatures.append( rawFeatName )
         self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
-            
     ################### REMOVE NODES #############################################
         print( "---> BEFORE REMOVED NODES:")
         print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
@@ -412,9 +399,8 @@ class DataSetFromYosys( DGLDataset ):
         #self.drawData = self.drawData.drop( isolated_nodes.tolist(), axis=1 )
         print( "\n---> AFTER REMOVED NODES:" )
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
-        print( "\tself.graph.ndata\n", self.graph.ndata )
+        #print( "\tself.graph.ndata\n", self.graph.ndata )
         # print( "DRAW DATA:\n", self.drawData )
-
     ################### CLOSENESS  ################################################
         #drawGraph( self.graph, self.graph.name )
         if 'closeness' in self.ablationFeatures:
@@ -424,7 +410,6 @@ class DataSetFromYosys( DGLDataset ):
             print( "nx_graph:\n", nx_graph, flush = True )
             # print( ".nodes:\n", nx_graph.nodes(data=True))
             # print( ".edges:\n", nx_graph.edges(data=True))
-                   
             close_scores = nx.closeness_centrality( nx_graph )
             # close_scores = nx.incremental_closeness_centrality( nx_graph )
             close_scores_list = list( close_scores.values() )
@@ -435,18 +420,11 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, close_tensor )
             if 'Closeness' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'Closeness' )
-
     ################### EIGENVECTOR  ################################################
-        #drawGraph( self.graph, self.graph.name )
         if 'eigen' in self.ablationFeatures:
             print( "calculating eigenvector!" )
             aux_graph = self.graph.to_networkx()
             nx_graph  = nx.Graph( aux_graph )
-            print( "nx_graph:\n", nx_graph, flush = True )
-            # print( ".nodes:\n", nx_graph.nodes(data=True))
-            # print( ".edges:\n", nx_graph.edges(data=True))
-                   
-            # eigen_scores = nx.eigenvector_centrality( nx_graph )
             eigen_scores = nx.eigenvector_centrality_numpy( nx_graph, max_iter = 5000 )
             eigen_scores_list = list( eigen_scores.values() )
             min_score = min( eigen_scores_list )
@@ -456,7 +434,6 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, eigen_tensor )
             if 'Eigen' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'Eigen' )
-
     ################### GROUP BETWEENNESS  ################################################
         #drawGraph( self.graph, self.graph.name )
         if 'between' in self.ablationFeatures:
@@ -503,8 +480,8 @@ class DataSetFromYosys( DGLDataset ):
             normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in pagerank_scores_list ] 
             pagerank_tensor = torch.tensor( normalized_scores )
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, pagerank_tensor )
-            if 'PageRank' not in self.namesOfFeatures:
-                self.namesOfFeatures.append( 'PageRank' )
+            if 'pageRank' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'pageRank' )
     ################### IN DEGREE ################################################    
         if 'inDegree' in self.ablationFeatures:
             nx_graph = self.graph.to_networkx()
@@ -529,23 +506,25 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, outDegree_tensor )
             if 'outDegree' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'outDegree' )
-    ################### KATZ ################################################    
+    ################### KATZ ################################################
         if 'katz' in self.ablationFeatures:
-            nx_graph = self.graph.to_networkx()
-            katz_scores = nx.katz_centrality(nx_graph)
+            print( "calculating katzvector!", flush = True )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            katz_scores = nx.katz_centrality( nx_graph, max_iter = 500, tol = 1.0e-5 )
             katz_scores_list = list( katz_scores.values() )
             min_score = min( katz_scores_list )
             max_score = max( katz_scores_list )
             normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in katz_scores_list ] 
             katz_tensor = torch.tensor( normalized_scores )
             self.graph.ndata[ featName ] = dynamicConcatenate( self.graph.ndata, katz_tensor )
-            if 'katz' not in self.namesOfFeatures:
-                self.namesOfFeatures.append( 'katz' )
-    ###################################################################
+            if 'Katz' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'Katz' )
+        ###################################################################
         if SELF_LOOP:
             self.graph = dgl.add_self_loop( self.graph )           
         print( "self.ablationFeatures (_process_single):", type( self.ablationFeatures ), len( self.ablationFeatures ), self.ablationFeatures )
-        print( "---> _process_single DONE.\n\tself.graph.ndata", type( self.graph.ndata ),"\n", self.graph.ndata, flush = True )
+        print( "---> _process_single DONE.\n\tself.graph.ndata", type( self.graph ), "\n", self.graph.ndata, flush = True )
         return self.graph
     
     # ###################### LOGIC DEPTH #####################################
@@ -939,6 +918,7 @@ class GAT(nn.Module):
 
  
 def evaluate( g, features, labels, model, path, device ):
+    torch.cuda.reset_peak_memory_stats()
     model.eval()
     with torch.no_grad():
         if( features.dim() == 1 ):
@@ -950,14 +930,17 @@ def evaluate( g, features, labels, model, path, device ):
         print( "\t>>>> labels   in evaluate:", type( labels ), labels.shape, labels[:10] ) #"\n", labels )
         print( "\t>>>> predicted after squeeze:", type( predicted ), predicted.shape, predicted[:10] )# "\n", predicted )
 
-        tp, tn, fp, fn = getPN( labels, predicted, 0.75 )
-        print( "tp, tn, fp, fn:", tp, tn, fp, fn )
-        f1 = getF1( tp, tn, fp, fn)
+        # tp, tn, fp, fn = getPN( labels, predicted, 0.75 )
+        # print( "tp, tn, fp, fn:", tp, tn, fp, fn )
+        # f1 = getF1( tp, tn, fp, fn)
+        # score_r2 = r2_score( labels.data.cpu(), predicted.data.cpu() )
+        f1 = np.float64(0.0)
+        score_r2 = np.float64(0.0)
         print( "F1:", f1 )
-        score_r2 = r2_score( labels.data.cpu(), predicted.data.cpu() )
+        print( "score_r2:", type(score_r2), score_r2 )
+        
         kendall = KendallRankCorrCoef( variant = 'a' ).to( device )
         print( "calculating kendal..." )
-        # score_kendall = kendall( predicted + 0.1, labels )
         score_kendall = kendall( predicted, labels )
         print( "Kendall calculated" )
         #print("score_kendall:", type( score_kendall ), str( score_kendall ), "\n", score_kendall,"\n\n")
@@ -967,6 +950,8 @@ def evaluate( g, features, labels, model, path, device ):
             ###### drawHeat( list( labels.data.cpu() ), list( predicted.data.cpu() ), path, g )
             if DRAWOUTPUTS:
                 drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
+        memory_usage = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+        print("memory usage in evaluate:", memory_usage )
         return score_kendall, score_r2, f1
 
 def evaluate_in_batches( dataloader, device, model ):
@@ -1061,7 +1046,7 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
             accumulated_memory_usage += memory_usage
             
         average_loss = total_loss / len(train_dataloader)
-        accumulated_memory_usage = accumulated_memory_usage / len(train_dataloader)
+        average_memory_usage = accumulated_memory_usage / len(train_dataloader)
         if average_loss < best_loss - improvement_threshold:
             best_loss = average_loss
             epochs_without_improvement = 0  # Reset the counter
@@ -1100,7 +1085,7 @@ def train( train_dataloader, val_dataloader, device, model, writerName ):
         print( "Epoch {:05d} | Train Loss {:.4f} | Valid Loss {:.4f} | ". format( epoch, average_loss, average_val_loss ), flush = True, end="" )
         print( "best_loss:", round( best_loss, 5 ), " | best_val_loss:", round( best_val_loss, 5 ), end=" | " )
         print( "epochs_without_improvement:", epochs_without_improvement, "val_without_improvement:", val_epochs_without_improvement )
-        print(f"Epoch: {epoch+1}, Max Memory Usage (MB): {max_memory_usage}, Accumulated Memory Usage (MB): {accumulated_memory_usage}", flush=True)
+        print(f"Epoch: {epoch+1}, Max Memory(MB): {max_memory_usage}, Average Memory(MB): {average_memory_usage}", flush=True)
         
         writer.add_scalar( "Loss Valid", average_val_loss, epoch )
         writer.add_scalar( "Loss Train", average_loss, epoch )
@@ -1187,26 +1172,41 @@ if __name__ == '__main__':
         f.write( "Featuers,Train-Mean,Train-SD,Valid-Mean,Valid-SD,Test-Mean,Test-SD\n" ) 
     if os.path.exists( "runs" ):
         shutil.rmtree( "runs" )
+
+    prefix = "[\'"
+    for folder_name in os.listdir("."):
+        if folder_name.startswith(prefix) and os.path.isdir(os.path.join(".", folder_name)):
+            folder_path = os.path.join(".", folder_name)
+            try:
+                shutil.rmtree(folder_path)
+                print(f"Deleted folder: {folder_path}")
+            except OSError as e:
+                print(f"Error deleting folder {folder_path}: {e}")
+
     
     print( ">>>>>> listDir:" )
     for index in range(len(listDir)):
         print("\tIndex:", index, "- Path:", listDir[index])
 
 
-    if ALLABLATION:
+    if not MANUALABLATION:
+        ablationList = []
         for combAux in range( 1, len( listFeats ) + 1 ):
-            print( "combAux( iteration ):", combAux, ", MAX:", len( listFeats ) + 1 )
-            ablationList = list( combinations( listFeats, combAux ) )
+            print( "iteration:", combAux, ", combinations:", len( list( combinations( listFeats, combAux ) ) ) )
+            ablationList += list( combinations( listFeats, combAux ) )
+            print( "ablationList:", len( ablationList ), ablationList )
     else:
         # ablationList = [('eigen',), ('eigen','type'), ('eigen','pageRank'), ('eigen','pageRank','type')]
         # ablationList = [ ('eigen','pageRank','type') ]
         # ablationList = [ ('inDegree','outDegree','eigen','pageRank','type') ]
-        ablationList =  [ ('katz',), ('eigen',), ('pagerank',), ('inDegree',), ( 'outDegree',), ('type',) ]
+        ablationList =  [ ('inDegree','outDegree','eigen','pageRank', 'type' ) ]
+        ablationList += [ ('eigen',), ('pageRank',), ('inDegree',), ( 'outDegree',), ('type',) ]
         ablationList += [ ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
         ablationList += [ ('outDegree','eigen','pageRank'), ('inDegree','eigen','pageRank'), ('inDegree','pageRank'), ('outDegree','pageRank') ]
         ablationList += [ ('inDegree','outDegree','eigen','pageRank'), ('inDegree','outDegree','eigen','pageRank','type'), ('type','eigen','pageRank'), ('eigen','pageRank') ]
-        
-    for mainIteration in range( 0, 1 ):
+    print( "MANUALABLATION:", MANUALABLATION )
+    print( "ablationList:", len( ablationList ), ablationList )
+    for mainIteration in range( 0, 10 ):
         print( "##################################################################################" )
         print( "########################## NEW MAIN RUN  ########################################" )
         print( "##################################################################################" )
@@ -1222,6 +1222,10 @@ if __name__ == '__main__':
                 f.write( ",labelName:" + labelName )
                 f.write( ",features: " ) 
                 f.write( "; ".join( ablationIter ) )
+                f.write( ",FULLTRAIN: " + str( FULLTRAIN ) )
+                f.write( ",MANUALABLATION:" + str( MANUALABLATION ) )
+                f.write( ",improvement_threshold:" + str( improvement_threshold ) )
+                f.write( ",patience:" + str( patience ) )
                 f.write( "\ntestIndex,validIndex,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
             with open( ablationResult, 'a' ) as f:
                 copied_list = [s[:1].capitalize() for s in ablationIter]
@@ -1300,6 +1304,9 @@ if __name__ == '__main__':
                         complete_dataset.appendGraph( test_dataset )
                         complete_dataset.drawCorrelationMatrices()
                         del complete_dataset
+                    print("check:")
+                    print(  train_dataset[0].ndata[ featName ]  )
+                    train_dataset.printDataset()
                     features = train_dataset[0].ndata[ featName ]      
                     if( features.dim() == 1 ):
                         features = features.unsqueeze(1)
@@ -1358,10 +1365,10 @@ if __name__ == '__main__':
                     writerName =  "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) )
                     writerName += "- " + str( ablationIter ) + "-" + str( mainIteration )
                     writerName += " -V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
-                    finalEpoch, maxMem, accMem = train( train_dataloader, val_dataloader, device, model, writerName )
+                    finalEpoch, maxMem, avergMem = train( train_dataloader, val_dataloader, device, model, writerName )
                     finalEpoch += 1
 
-                    print( '######################\n## Final Evaluation ##\n######################\n' )
+                    print( '######################\n## Final Evaluation ##\n######################\n', flush = True )
                     startTimeEval = time.time()
                     if not SKIPFINALEVAL:
                         # for k in range( len( train_dataset ) ):
@@ -1400,14 +1407,14 @@ if __name__ == '__main__':
                         test_kendall= test_r2= test_f1= train_kendall= train_r2= train_f1= valid_kendall= valid_r2= valid_f1= torch.tensor([0])
                     print( "\n###############################\n## FinalEvalRuntime:", round( ( time.time() - startTimeEval ) / 60, 1) , "min ##\n###############################\n" )
                     iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
-                    print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n" )
+                    print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n", flush = True )
 
                     kendallTest.append ( test_kendall.item()  )
                     kendallValid.append( valid_kendall.item() )
                     kendallTrain.append( train_kendall.item() )
                     print( "val_dataset.getNames()", val_dataset.getNames(), "test_dataset.getNames()", test_dataset.getNames() )
                     with open( summary, 'a' ) as f:
-                        f.write( str( testIndex ) + ","+str( validIndex )+","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( accMem / finalEpoch )+"," )
+                        f.write( str( testIndex ) + ","+str( validIndex )+","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch )+"," )
                         f.write( ";".join(map(str, val_dataset.getNames() ) ) +","+ ";".join(map(str, test_dataset.getNames() ) ) +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() ))
                         f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() ) )  #+"\n")
                         f.write( "," + str( train_f1.item() ) +","+ str( valid_f1.item() ) +","+ str( test_f1.item() )  +"\n")
@@ -1419,6 +1426,7 @@ if __name__ == '__main__':
                     del train_dataloader
                     del val_dataloader
                     del test_dataloader
+                    torch.cuda.empty_cache()
                     if FULLTRAIN:
                         break
                         break
@@ -1436,10 +1444,10 @@ if __name__ == '__main__':
             # shutil.move( "image_outputs", os.path.join( folder_name, "image_outputs" ) )
             shutil.move( "image_outputs", folder_name )
         with open( ablationResult, 'a' ) as f:
-            f.writea("\n")
+            f.write("\n")
     endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 1 )
     with open( summary, 'a' ) as f:
-        f.write( ",,," + str( endTimeAll ) + " hours" ) 
+        f.write( ",,featCombinations:"+ str( len( ablationList ) )+"," + str( endTimeAll ) + " hours" ) 
     print("\n\n All finished, runtime:", endTimeAll, "hours" )
 
     folders = [folder for folder in os.listdir() if os.path.isdir(folder)]
