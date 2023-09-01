@@ -45,9 +45,9 @@ print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 print( "dgl.__version_:", dgl.__version__ )
 
 mainMaxIter      = 2
-FULLTRAIN        = True
+FULLTRAIN        = False
 num_folds        = 4
-MANUALABLATION   = False
+MANUALABLATION   = True
 listFeats = [ 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type' ] #, 'closeness', 'between' ] # logicDepth
 featName = 'feat' #listFeats[0]
 rawFeatName = 'type' #TODO: change to listFeats[0]
@@ -55,8 +55,8 @@ rawFeatName = 'type' #TODO: change to listFeats[0]
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 200
-minEpochs = 50
+maxEpochs = 250
+minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
@@ -656,57 +656,48 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     plt.clf()
 
 ################################# VALUES PLOT ########################################################
-    types = graph.ndata[ featName ].to( torch.float32 ).to( "cpu" )
-    predict_aux = predict_normalized[:10000].to( "cpu" )
-    label_aux   = label_normalized  [:10000].to( "cpu" )
-    plt.scatter(range(len(predict_aux ) ), predict_aux, color='blue', label='Predict')
-    plt.scatter(range(len(label_aux ) ), label_aux, color='red', label='Label')
-    plt.xlabel('Index')
-    plt.ylabel('Value')
-    plt.title('Predicted vs. Labeled Values')
-    plt.legend()
+    # WORKING!
+    # types = graph.ndata[ featName ].to( torch.float32 ).to( "cpu" )
+    # predict_aux = predict_normalized[:10000].to( "cpu" )
+    # label_aux   = label_normalized  [:10000].to( "cpu" )
+    # plt.scatter(range(len(predict_aux ) ), predict_aux, color='blue', label='Predict')
+    # plt.scatter(range(len(label_aux ) ), label_aux, color='red', label='Label')
+    # plt.xlabel('Index')
+    # plt.ylabel('Value')
+    # plt.title('Predicted vs. Labeled Values')
+    # plt.legend()
     
-    auxName = drawHeatName.replace( "/", "/valuesPlot/", 1 )
-    print( "auxName:", auxName )
-    plt.savefig( auxName )
-    plt.close( 'all' )
-    plt.clf()
+    # auxName = drawHeatName.replace( "/", "/valuesPlot/", 1 )
+    # print( "auxName:", auxName )
+    # plt.savefig( auxName )
+    # plt.close( 'all' )
+    # plt.clf()
 ######################################################################################################
     
 ################################# RESIDUAL ########################################################    
-    # residual = ( predict_normalized - label_normalized ).to("cpu")
-    # x, y = torch.meshgrid( label_normalized, predict_normalized )
-    # plt.imshow( residual.unsqueeze(0), cmap = 'coolwarm', origin = 'lower' )
-    # plt.xticks( range( len( label_normalized ) ), label_normalized )
-    # plt.yticks( range( len( predict_normalized ) ), predict_normalized )
-    # plt.xlabel( 'Label' )
-    # plt.ylabel( 'Predict' )
-    # plt.colorbar( label = 'Residual' )
-    # plt.title( 'Residual' )
 
-    ###############
-    residual = label_normalized - predict_normalized
-    residual_np = residual.to("cpu").numpy()
-    residual_np = residual_np[~np.isnan(residual_np)]
-    if residual_np.size > 0:  # Check if the filtered array is not empty
-        plt.figure(figsize=(8, 6))
-        plt.hist(residual_np, bins=50, edgecolor='black')
-        plt.xlabel('Index')
-        plt.ylabel('Value')
-        plt.title('Residual Plot')
-        plt.xlim( -1, 1 )
-        plt.legend()
+    # WORKING!
+    # residual = label_normalized - predict_normalized
+    # residual_np = residual.to("cpu").numpy()
+    # residual_np = residual_np[~np.isnan(residual_np)]
+    # if residual_np.size > 0:  # Check if the filtered array is not empty
+    #     plt.figure(figsize=(8, 6))
+    #     plt.hist(residual_np, bins=50, edgecolor='black')
+    #     plt.xlabel('Index')
+    #     plt.ylabel('Value')
+    #     plt.title('Residual Plot')
+    #     plt.xlim( -1, 1 )
+    #     plt.legend()
     
-    auxName = drawHeatName.replace( "/", "/errorTable/", 1 )
-    print( "auxName:", auxName )
-    plt.savefig( auxName )
-    plt.close( 'all' )
-    plt.clf()
+    # auxName = drawHeatName.replace( "/", "/errorTable/", 1 )
+    # print( "auxName:", auxName )
+    # plt.savefig( auxName )
+    # plt.close( 'all' )
+    # plt.clf()
 ######################################################################################################
 
 ############################# HEATMAPS ###############################################################
     positions = graph.ndata[ "position" ].to( torch.float32 ).to( "cpu" )
-    # if not torch.equal( graph.ndata[ labelName ].to(device), torch.tensor( label ).to(device) ):
     if not torch.equal( graph.ndata[ labelName ].to(device).to( torch.float32 ), tensorLabel ):
         print( "\n\n\n\n SOMETHING WRONG!!! UNEXPECTED LABELS IN DRAW HEAT \n\n\n" )
         print( "positions.to(device):\n", graph.ndata[ labelName ].to(device).to( torch.float32 ), "\n\ntensorLabel:\n", tensorLabel )
@@ -722,8 +713,8 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
         ax1.add_patch( rect1 )
         ax2.add_patch( rect2 )
 
-    ax1.set_xlim( positions[ :, 0 ].min() - 1, positions[ :, 2 ].max() + 4)
-    ax1.set_ylim( positions[ :, 1 ].min() - 1, positions[ :, 3 ].max() + 1)
+    ax1.set_xlim( positions[ :, 0 ].min() - 1, positions[ :, 2 ].max() + 4 )
+    ax1.set_ylim( positions[ :, 1 ].min() - 1, positions[ :, 3 ].max() + 1 )
     ax1.set_title( 'Predict' )
     ax1.set_aspect( 'equal' )  # Set aspect ratio to equal for proper rectangle visualization
 
@@ -732,8 +723,8 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     mcb.ColorbarBase( cax1, cmap = 'coolwarm', norm = mcolors.Normalize( vmin = predict_normalized.min(), vmax = predict_normalized.max() ), orientation = 'vertical' )
     cax1.set_ylabel( 'Prediction' )
 
-    ax2.set_xlim( positions[ :, 0 ].min() - 1, positions[ :, 2 ].max() + 4)
-    ax2.set_ylim( positions[ :, 1 ].min() - 1, positions[ :, 3 ].max() + 1)
+    ax2.set_xlim( positions[ :, 0 ].min() - 1, positions[ :, 2 ].max() + 4 )
+    ax2.set_ylim( positions[ :, 1 ].min() - 1, positions[ :, 3 ].max() + 1 ) 
     ax2.set_title( 'Label' )
     ax2.set_aspect( 'equal' )  # Set aspect ratio to equal for proper rectangle visualization
 
@@ -753,134 +744,45 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
 ######################################################################################################
 
 ############################ HISTOGRAMS ##############################################################
-    tensor1 = predict_normalized
-    tensor2 = label_normalized
-
-    # Define the bucket ranges based on minimum and maximum values of the tensors
-    min_value = min(tensor1.min().item(), tensor2.min().item())
-    max_value = max(tensor1.max().item(), tensor2.max().item())
-    bucket_ranges = [min_value,
-                     min_value + (max_value - min_value) / 4,
-                     min_value + (max_value - min_value) / 2,
-                     min_value + (max_value - min_value) * 3 / 4,
-                     max_value]
-
-    # Initialize match count for each bucket to 0
-    match_counts = [0] * len(bucket_ranges)
-    total_counts = len( tensor1 )
-    
-    # Iterate through the values in both tensors and count matches in each bucket
-    for val1, val2 in zip(tensor1, tensor2):
-        for i in range(len(bucket_ranges) - 1):  # Exclude the last bucket range
-            if bucket_ranges[i] <= val1 < bucket_ranges[i+1] and bucket_ranges[i] <= val2 < bucket_ranges[i+1]:
-                match_counts[i] += 1
-
-    # Create a figure with two subplots
-    #fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [2, 1]})
-    fig, (ax2, ax1, ax3) = plt.subplots(3, 1, sharex=True, gridspec_kw={'height_ratios': [2, 2, 2]})
-
-    # Plot the combined histogram with range values and match counts
-    ax1.hist( [ tensor1.tolist(), tensor2.tolist() ], bins = bucket_ranges, alpha = 0.7, label = [ 'predict', 'label' ] )
-    ax1.set_ylabel( 'Frequency' )
-
-    ax3.set_ylabel( 'Frequency' )
-    # Plot the match counts as text in the combined histogram
-    for i in range(len(bucket_ranges) - 1):  # Exclude the last bucket range
-        bucket_center = ( bucket_ranges[i] + bucket_ranges[ i+1 ] ) / 2
-        width = ( bucket_ranges[i+1] - bucket_ranges[i] ) * 0.8
-        #ax3.text( bucket_center, match_counts[i], str( int( match_counts[i] ) ), ha='center' )
-        ax1.text( bucket_center, match_counts[i], str( int( match_counts[i] ) ), ha='center' )
-
-        ax3.text( bucket_center, match_counts[i], str( round( ( match_counts[i] / total_counts )*100,1 ) ), ha='center' )
-        #ax1.text( bucket_center, match_counts[i], str( round( ( match_counts[i] / total_counts )*100,1 ) ), ha='center' )
-
-        ax3.bar( bucket_center, match_counts[i], width = width, color = 'green' )
-
-    # Plot the individual histograms
-    ax2.hist( tensor1.tolist(), bins = bucket_ranges, alpha=0.7, label='predict')
-    ax2.hist( tensor2.tolist(), bins = bucket_ranges, alpha=0.7, label='label')
-    ax2.set_xlabel('Value')
-    ax2.set_ylabel('Frequency')
-
-    # Add legend to the second subplot
-    ax2.legend()
-
-    # Set title for the figure
-    fig.suptitle('Histogram Comparison')
-
-    # Adjust spacing between subplots
-    plt.tight_layout()
-
-    # Save the figure as an image
-    auxName = drawHeatName.replace("/", "/histogram/", 1)
-    print("auxName:", auxName)
-    plt.savefig(auxName)
-    plt.close('all')
+    # WORKING!
+    # tensor1 = predict_normalized
+    # tensor2 = label_normalized
+    # min_value = min(tensor1.min().item(), tensor2.min().item())
+    # max_value = max(tensor1.max().item(), tensor2.max().item())
+    # bucket_ranges = [min_value,
+    #                  min_value + (max_value - min_value) / 4,
+    #                  min_value + (max_value - min_value) / 2,
+    #                  min_value + (max_value - min_value) * 3 / 4,
+    #                  max_value]
+    # match_counts = [0] * len(bucket_ranges)
+    # total_counts = len( tensor1 )
+    # for val1, val2 in zip(tensor1, tensor2):
+    #     for i in range(len(bucket_ranges) - 1):  # Exclude the last bucket range
+    #         if bucket_ranges[i] <= val1 < bucket_ranges[i+1] and bucket_ranges[i] <= val2 < bucket_ranges[i+1]:
+    #             match_counts[i] += 1
+    # fig, (ax2, ax1, ax3) = plt.subplots(3, 1, sharex=True, gridspec_kw={'height_ratios': [2, 2, 2]})
+    # ax1.hist( [ tensor1.tolist(), tensor2.tolist() ], bins = bucket_ranges, alpha = 0.7, label = [ 'predict', 'label' ] )
+    # ax1.set_ylabel( 'Frequency' )
+    # ax3.set_ylabel( 'Frequency' )
+    # for i in range(len(bucket_ranges) - 1):  # Exclude the last bucket range
+    #     bucket_center = ( bucket_ranges[i] + bucket_ranges[ i+1 ] ) / 2
+    #     width = ( bucket_ranges[i+1] - bucket_ranges[i] ) * 0.8
+    #     ax1.text( bucket_center, match_counts[i], str( int( match_counts[i] ) ), ha='center' )
+    #     ax3.text( bucket_center, match_counts[i], str( round( ( match_counts[i] / total_counts )*100,1 ) ), ha='center' )
+    #     ax3.bar( bucket_center, match_counts[i], width = width, color = 'green' )
+    # ax2.hist( tensor1.tolist(), bins = bucket_ranges, alpha=0.7, label='predict')
+    # ax2.hist( tensor2.tolist(), bins = bucket_ranges, alpha=0.7, label='label')
+    # ax2.set_xlabel('Value')
+    # ax2.set_ylabel('Frequency')
+    # ax2.legend()
+    # fig.suptitle('Histogram Comparison')
+    # plt.tight_layout()
+    # auxName = drawHeatName.replace("/", "/histogram/", 1)
+    # print("auxName:", auxName)
+    # plt.savefig(auxName)
+    # plt.close('all')
 ######################################################################################################
 
-    
-   
-    # sorted_pairs = sorted( zip( label, predict ) )
-    # sorted_label, sorted_predict = zip( *sorted_pairs )
-    # fig, axes = plt.subplots( nrows = 2, ncols = 1, figsize = ( 10, 10 ) )
-    # # axes[0].plot( sorted_label )
-    # axes[0].scatter( range( len( sorted_label ) ), sorted_label )
-    # #axes[0].bar( range( len( sorted_label ) ), sorted_label )
-    # axes[0].set_title( 'Label' )
-    # axes[0].set_xlabel( 'Index' )
-    # axes[0].set_ylabel( 'Value' )
-
-    # # axes[1].plot( sorted_predict )
-    # axes[1].scatter( range( len( sorted_predict ) ), sorted_predict )
-    # #axes[1].bar( range( len( sorted_predict ) ), sorted_predict )
-    # axes[1].set_title( 'Predicted' )
-    # axes[1].set_xlabel( 'Index' )
-    # axes[1].set_ylabel( 'Value' ) 
-
-    # plt.subplots_adjust( hspace=0.3 )
-    # auxName = drawHeatName.replace( "/", "/columns/", 1 )
-    # # first_slash = auxName.find('/')
-    # # if first_slash != -1:
-    # #     auxName[ :first_slash ] + "/columns/" + auxName[ first_slash+1: ]
-    # print( "auxName:", auxName )
-    # plt.savefig( auxName )
-    # plt.close( fig ) 
-
-
-    # vminLabel = np.min( label )
-    # vmaxLabel = np.max( label )
-    # vminPred = np.min( predict )
-    # vmaxPred = np.max( predict )
-    
-    # size = int( np.ceil( np.sqrt( len( label ) ) ) )
-    # # sorted_label = np.pad( np.array( sorted_label ), ( 0, size**2 - len( label ) ), mode='constant' ).reshape( size, size )
-    # # sorted_predict = np.pad( np.array( sorted_predict ), ( 0, size**2 - len( predict ) ), mode='constant' ).reshape( size, size )
-    # label = np.pad( np.array( label ), ( 0, size**2 - len( label ) ), mode='constant', constant_values = vminLabel ).reshape( size, size )
-    # predict = np.pad( np.array( predict ), ( 0, size**2 - len( predict ) ), mode='constant', constant_values = vminPred ).reshape( size, size )
-    # # vmin = min( np.min( sorted_label ), np.min( sorted_predict ) )
-    # # vmax = max( np.max( sorted_label ), np.max( sorted_predict ) )
-    # fig, ax = plt.subplots( nrows = 1, ncols = 2, figsize = ( 10, 5 ) )
-
-    # im1 = ax[0].imshow( label, cmap='YlGnBu', vmin = vminLabel, vmax = vmaxLabel )
-    # ax[0].set_title( 'Labels' )
-    # ax[0].set_xlabel( 'Column Index' )
-    # ax[0].set_ylabel( 'Row Index' )
-    # fig.colorbar( im1, ax = ax[0] )
-
-    # im2 = ax[1].imshow( predict, cmap='YlGnBu', vmin = vminPred, vmax = vmaxPred )
-    # ax[1].set_title( 'Predicted' )
-    # ax[1].set_xlabel( 'Column Index' )
-    # ax[1].set_ylabel( 'Row Index' )
-    # fig.colorbar( im2, ax = ax[1] )
-
-    # plt.subplots_adjust( wspace=0.3 )
-    # auxName = drawHeatName.replace( "/", "/heatmaps/", 1 )
-    # # auxName = drawHeatName
-    # # first_slash = auxName.find("/")
-    # # if first_slash != -1:
-    # #     auxName[ : first_slash ] + "/heatmaps/" + auxName[ first_slash + 1 : ]
-    # print( "auxName:", auxName )
-    # plt.savefig( auxName )
     
     
 class SAGE( nn.Module ):
@@ -952,14 +854,13 @@ def evaluate( g, features, labels, model, path, device ):
         if len( path ) > 0:
             print( "\tdrawing output" )
             path = path +"k{:.4f}".format( score_kendall ) + ".png"
-            ###### drawHeat( list( labels.data.cpu() ), list( predicted.data.cpu() ), path, g )
             if DRAWOUTPUTS:
                 drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
         memory_usage = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
         print("memory usage in evaluate:", memory_usage )
         return score_kendall, score_r2, f1
 
-def evaluate_in_batches( dataloader, device, model ):
+def evaluate_in_batches( dataloader, device, model, image_path = "" ):
     total_kendall = 0.0
     total_r2      = 0.0
     total_f1      = 0.0
@@ -968,12 +869,14 @@ def evaluate_in_batches( dataloader, device, model ):
     for batch_id, batched_graph in enumerate( dataloader ):
         print( "batch_id (eval_in_batches):", batch_id )
         batched_graph = batched_graph.to( device )
+        print( "batched_graph:", type( batched_graph ), batched_graph )
+        print( "theDataset[ batch_id ]:", theDataset[ batch_id ] )
         features = batched_graph.ndata[ featName ].float().to( device )
         labels   = batched_graph.ndata[ labelName ].to( device )
         
 #        print("features in evaluate_in_batches:", type(features), features.shape,"\n", features )
 #        print("labels in evaluate_in_batches:", type(labels), labels.shape,"\n", labels )
-        score_kendall, score_r2, f1 = evaluate( batched_graph, features, labels, model, "", device )
+        score_kendall, score_r2, f1 = evaluate( batched_graph, features, labels, model, image_path, device )
         print( "partial Kendall (eval_in_batches):", score_kendall, ", r2:", score_r2, ", batch_id:", batch_id )
         total_kendall += score_kendall
         total_r2      += score_r2
@@ -995,7 +898,7 @@ def evaluate_single( graph, device, model, path ):
     return score_kendall, score_r2, f1
 
 
-def train( train_dataloader, valid_dataloader, device, model, writerName ):
+def train( train_dataloader, device, model, writerName ):
     print( "device in train:", device )
     writer = SummaryWriter( comment = writerName )
 
@@ -1010,11 +913,11 @@ def train( train_dataloader, valid_dataloader, device, model, writerName ):
     loss_fcn = nn.MSELoss()
     optimizer = torch.optim.Adam( model.parameters(), lr = step, weight_decay = 0 )
     
-################### Early Stop loop ###########################
+###################  Stop loop ###########################
     best_loss = float('inf')  # Initialize the best training loss with a large value
-    best_val_loss = float('inf')  # Initialize the best validation loss with a large value
+    #best_val_loss = float('inf')  # Initialize the best validation loss with a large value
     epochs_without_improvement = 0  # Counter for epochs without improvement
-    val_epochs_without_improvement = 0  # Counter for validation epochs without improvement
+    #val_epochs_without_improvement = 0  # Counter for validation epochs without improvement
     
     for epoch in range( maxEpochs + 1 ):
         model.train()
@@ -1059,40 +962,40 @@ def train( train_dataloader, valid_dataloader, device, model, writerName ):
             epochs_without_improvement += 1
 
         ###### Validation loop #######
-        model.eval()
-        total_val_loss = 0
-        for batch_id, batched_graph in enumerate(valid_dataloader):
-            batched_graph = batched_graph.to(device)
-            features = batched_graph.ndata[featName].float()
-            if features.dim() == 1:
-                features = features.float().unsqueeze(1)
-            logits = model(batched_graph, features)
-            labels = batched_graph.ndata[labelName].float()
-            if labels.dim() == 1:
-                labels = labels.unsqueeze(-1)
-            loss = loss_fcn(logits, labels)
-            total_val_loss += loss.item()
+        # model.eval()
+        # total_val_loss = 0
+        # for batch_id, batched_graph in enumerate(valid_dataloader):
+        #     batched_graph = batched_graph.to(device)
+        #     features = batched_graph.ndata[featName].float()
+        #     if features.dim() == 1:
+        #         features = features.float().unsqueeze(1)
+        #     logits = model(batched_graph, features)
+        #     labels = batched_graph.ndata[labelName].float()
+        #     if labels.dim() == 1:
+        #         labels = labels.unsqueeze(-1)
+        #     loss = loss_fcn(logits, labels)
+        #     total_val_loss += loss.item()
 
-        average_val_loss = total_val_loss / len(valid_dataloader)
-        if average_val_loss < best_val_loss - improvement_threshold:
-            best_val_loss = average_val_loss
-            val_epochs_without_improvement = 0  # Reset the counter
-        else:
-            val_epochs_without_improvement += 1
+        # average_val_loss = total_val_loss / len(valid_dataloader)
+        # if average_val_loss < best_val_loss - improvement_threshold:
+        #     best_val_loss = average_val_loss
+        #     val_epochs_without_improvement = 0  # Reset the counter
+        # else:
+        #     val_epochs_without_improvement += 1
         # if useEarlyStop and (epochs_without_improvement >= patience or val_epochs_without_improvement >= patience):
-        if useEarlyStop and ( epoch >= minEpochs ) and (epochs_without_improvement >= patience or val_epochs_without_improvement >= patience):
+        if useEarlyStop and ( ( epoch >= minEpochs ) and (epochs_without_improvement >= patience ) or ( average_loss <= 0.0000000001 ) ): # or val_epochs_without_improvement >= patience):
             print("=======> Early stopping!")
             break
 
-        #print( "Epoch {:05d} | Loss {:.4f} |". format( epoch, average_loss ), flush = True )
-        #print( "average_loss:", round( average_loss, 5 ), "best_loss:", round( best_loss, 5 ) )
-        #print( "average_val_loss:", round( average_val_loss, 5 ), "best_val_loss:", round( best_val_loss, 5 ) )
-        print( "Epoch {:05d} | Train Loss {:.4f} | Valid Loss {:.4f} | ". format( epoch, average_loss, average_val_loss ), flush = True, end="" )
-        print( "best_loss:", round( best_loss, 5 ), " | best_val_loss:", round( best_val_loss, 5 ), end=" | " )
-        print( "epochs_without_improvement:", epochs_without_improvement, "val_without_improvement:", val_epochs_without_improvement )
+        # print( "Epoch {:05d} | Train Loss {:.4f} | Valid Loss {:.4f} | ". format( epoch, average_loss, average_val_loss ), flush = True, end="" )
+        # print( "best_loss:", round( best_loss, 5 ), " | best_val_loss:", round( best_val_loss, 5 ), end=" | " )
+        # print( "epochs_without_improvement:", epochs_without_improvement, "val_without_improvement:", val_epochs_without_improvement )
+        print( "Epoch {:05d} | Train Loss {:.4f} ". format( epoch, average_loss ), flush = True, end="" )
+        print( "best_loss:", round( best_loss, 5 ), end=" | " )
+        print( "epochs_without_improvement:", epochs_without_improvement )
         print(f"Epoch: {epoch+1}, Max Memory(MB): {max_memory_usage}, Average Memory(MB): {average_memory_usage}", flush=True)
         
-        writer.add_scalar( "Loss Valid", average_val_loss, epoch )
+        #writer.add_scalar( "Loss Valid", average_val_loss, epoch )
         writer.add_scalar( "Loss Train", average_loss, epoch )
         if DEBUG == 1:
             if ( epoch + 1 ) % 5 == 0:
@@ -1100,11 +1003,6 @@ def train( train_dataloader, valid_dataloader, device, model, writerName ):
                 print( "                            Kendall {:.4f} ". format( kendall ) )
                 print( "                            R2      {:.4f} ". format( r2 ) )
                 print( "                            F1      {:.4f} ". format( f1 ) )
-        # if DEBUG == 2:
-            # kendall, r2, f1 = evaluate_in_batches( valid_dataloader, device, model )
-            # writer.add_scalar( "Score TEST Kendall", kendall, epoch )
-            # kendall, r2, f1 = evaluate_in_batches( train_dataloader, device, model )
-            # writer.add_scalar( "Score TRAIN Kendall", kendall, epoch )
     writer.flush()
     writer.close()
     torch.cuda.empty_cache()
@@ -1186,12 +1084,10 @@ if __name__ == '__main__':
                 print(f"Deleted folder: {folder_path}")
             except OSError as e:
                 print(f"Error deleting folder {folder_path}: {e}")
-
-    
+                
     print( ">>>>>> listDir:" )
     for index in range(len(listDir)):
         print("\tIndex:", index, "- Path:", listDir[index])
-
 
     if not MANUALABLATION:
         ablationList = []
@@ -1200,14 +1096,12 @@ if __name__ == '__main__':
             ablationList += list( combinations( listFeats, combAux ) )
             print( "ablationList:", len( ablationList ), ablationList )
     else:
-        # ablationList = [('eigen',), ('eigen','type'), ('eigen','pageRank'), ('eigen','pageRank','type')]
-        # ablationList = [ ('eigen','pageRank','type') ]
-        # ablationList = [ ('inDegree','outDegree','eigen','pageRank','type') ]
-        ablationList =  [ ('inDegree','outDegree','eigen','pageRank', 'type' ) ]
-        ablationList += [ ('eigen',), ('pageRank',), ('inDegree',), ( 'outDegree',), ('type',) ]
-        ablationList += [ ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
-        ablationList += [ ('outDegree','eigen','pageRank'), ('inDegree','eigen','pageRank'), ('inDegree','pageRank'), ('outDegree','pageRank') ]
-        ablationList += [ ('inDegree','outDegree','eigen','pageRank'), ('inDegree','outDegree','eigen','pageRank','type'), ('type','eigen','pageRank'), ('eigen','pageRank') ]
+        ablationList = [('eigen','pageRank','inDegree','outDegree'), ('pageRank','inDegree','outDegree'), ('eigen','pageRank','outDegree'), ('inDegree','outDegree'), ('pageRank','outDegree')]
+        # ablationList =  [ ('inDegree','outDegree','eigen','pageRank', 'type' ) ]
+        # ablationList += [ ('eigen',), ('pageRank',), ('inDegree',), ( 'outDegree',), ('type',) ]
+        # ablationList += [ ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
+        # ablationList += [ ('outDegree','eigen','pageRank'), ('inDegree','eigen','pageRank'), ('inDegree','pageRank'), ('outDegree','pageRank') ]
+        # ablationList += [ ('inDegree','outDegree','eigen','pageRank'), ('inDegree','outDegree','eigen','pageRank','type'), ('type','eigen','pageRank'), ('eigen','pageRank') ]
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
     for mainIteration in range( 0, mainMaxIter ):
@@ -1230,7 +1124,7 @@ if __name__ == '__main__':
                 f.write( ",MANUALABLATION:" + str( MANUALABLATION ) )
                 f.write( ",improvement_threshold:" + str( improvement_threshold ) )
                 f.write( ",patience:" + str( patience ) )
-                f.write( "\ntestIndex,validIndex,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
+                f.write( "\ntrainIndices,testIndices,validIndices,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Valid, Circuit Test, TrainKendall, ValidKendall, TestKendall, TrainR2, ValidR2, TestR2, TrainF1, ValidF1, TestF1\n" )
             with open( ablationResult, 'a' ) as f:
                 copied_list = [s[:1].capitalize() for s in ablationIter]
                 f.write( "; ".join( copied_list ) )
@@ -1265,46 +1159,13 @@ if __name__ == '__main__':
             kf = KFold( n_splits = num_folds )
             for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
                 print(f"Fold {fold+1}/{num_folds}")
-                train_indices, valid_indices = train_indices[:-len(test_indices)], train_indices[-len(test_indices):]
-                #train_indices = train_indices.tolist()
-                #valid_indices = train_indices
-
-                # for testIndex in testIterable:
-                #     for validIndex in validIterable:
-                # if TandV == 1:
-                #     if testIndex == validIndex:
-                #             continue
-                #     if TandV == 2 and ( testIndex +1 == validIndex or testIndex == validIndex ):
-                #         continue
-                # while validIndex == testIndex or validIndex == testIndex+1 or validIndex in validIterable:
-                #     validIndex = random.randint( 0, len( listDir ) -1)
-                # print( "new validIndex:", validIndex )
+                #train_indices, valid_indices = train_indices[:-len(test_indices)], train_indices[-len(test_indices):]
                         
                 startIterationTime = time.time()
                 print( "##################################################################################" )
                 print( "#################### New CrossValid iteration  ###################################" )
                 print( "##################################################################################" )
-                #currentDir = listDir.copy()
-
-                # if TandV == 1:
-                #     auxString1 = currentDir[ -1 ]
-                #     auxString2 = currentDir[ -2 ]
-                #     currentDir[ -1 ] = currentDir[ testIndex ]
-                #     currentDir[ -2 ] = currentDir[ validIndex]
-                #     currentDir[ testIndex ] = auxString1
-                #     currentDir[ validIndex] = auxString2
-                # if TandV == 2:
-                #     auxString1 = currentDir[ -1 ]
-                #     auxString2 = currentDir[ -2 ]
-                #     auxString3 = currentDir[ -3 ]
-                #     currentDir[ -1 ] = currentDir[ testIndex    ]
-                #     currentDir[ -2 ] = currentDir[ testIndex +1 ]
-                #     currentDir[ -3 ] = currentDir[ validIndex   ]
-                #     currentDir[ testIndex    ] = auxString1
-                #     currentDir[ testIndex +1 ] = auxString2
-                #     currentDir[ validIndex   ] = auxString3  
-                    
-
+               
                 # train_dataset = DataSetFromYosys( currentDir, ablationIter, mode='train' )
                 # val_dataset   = DataSetFromYosys( currentDir, ablationIter, mode='valid' )
                 # test_dataset  = DataSetFromYosys( currentDir, ablationIter, mode='test'  )
@@ -1349,92 +1210,54 @@ if __name__ == '__main__':
                 # valid_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
                 # test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
                 print( "train_indices:", type( train_indices ), train_indices )
-                print( "valid_indices:", type( valid_indices ), valid_indices )
+                #print( "valid_indices:", type( valid_indices ), valid_indices )
                 print( "test_indices:", type( test_indices ), test_indices )
-                # train_dataset = torch.utils.data.dataset.Subset( theDataset, train_indices )
-                # val_dataset = torch.utils.data.dataset.Subset( theDataset, valid_indices )
-                # test_dataset  = torch.utils.data.dataset.Subset( theDataset, test_indices  )
 
                 if FULLTRAIN:
                     train_dataloader = GraphDataLoader( theDataset, batch_size = 1 )#5 , sampler = train_sampler )
-                    valid_dataloader = GraphDataLoader( theDataset, batch_size = 1 )
+                    #valid_dataloader = GraphDataLoader( theDataset, batch_size = 1 )
                     test_dataloader  = None
                 else:
                     train_dataloader = GraphDataLoader( torch.utils.data.dataset.Subset( theDataset, train_indices ), batch_size = 1 )#5 , sampler = train_sampler )
-                    valid_dataloader = GraphDataLoader( torch.utils.data.dataset.Subset( theDataset, valid_indices ), batch_size = 1 )
+                    #valid_dataloader = GraphDataLoader( torch.utils.data.dataset.Subset( theDataset, valid_indices ), batch_size = 1 )
                     test_dataloader  = GraphDataLoader( torch.utils.data.dataset.Subset( theDataset, test_indices  ), batch_size = 1 )
 
                 print( "len( train_dataloader ) number of batches:", len( train_dataloader ) )
                 print( "\n###################"   )
-                print( "### SPLIT INFO ####"   )
+                print( "## THE DATASET ####"   )
                 print( "###################"   )
-
                 theDataset.printDataset()
-                # train_dataset.printDataset()    
-                # val_dataset.printDataset()    
-                # test_dataset.printDataset()
-
-                # print( "->original:   ", end="" )
-                # for item in listDir:
-                #     print( str( item ).rsplit( '/' )[-1], end=", " )
-                # print( "\n" )
-                # print( "->currentDir: ", end="" )
-                # for item in currentDir:
-                #     print( str( item ).rsplit( '/' )[-1], end=", " )
-                # print( "\n" )
-                #print( "testIndex:", testIndex, "validIndex:", validIndex )
-                #print( "split lengths:", len( train_dataset ), len( val_dataset ), len( test_dataset ) )
-
-                # writerName =  "-" + labelName +"-"+ str( len(train_dataset) ) +"-"+ str( len(val_dataset) ) +"-"+ str( len(test_dataset) )
-                writerName =  "-" + labelName +"-"+ str( len( train_indices ) ) +"-"+ str( len( valid_indices ) ) +"-"+ str( len( test_indices ) )
+                
+                writerName =  "-" + labelName +"-"+ str( len( train_indices ) ) +"-"+ str( len( test_indices ) )
                 writerName += "- " + str( ablationIter ) + "-" + str( mainIteration )
-                #writerName += " -V-"+ val_dataset.getNames()[0] +"-T-"+ test_dataset.getNames()[0]
-                writerName += " -V-"+ ';'.join( theDataset.getNames()[i] for i in valid_indices ) +"-T-"+ ';'.join( theDataset.getNames()[i] for i in test_indices )
-                finalEpoch, maxMem, avergMem = train( train_dataloader, valid_dataloader, device, model, writerName )
+                writerName += " T-"+ ';'.join( theDataset.getNames()[i] for i in test_indices )
+                finalEpoch, maxMem, avergMem = train( train_dataloader, device, model, writerName )
                 finalEpoch += 1
 
                 print( '######################\n## Final Evaluation ##\n######################\n', flush = True )
                 startTimeEval = time.time()
                 if not SKIPFINALEVAL:
-                    # for k in range( len( train_dataset ) ):
-                    #     g = train_dataset[k].to( device )
-                    #     path = train_dataset.names[k]
-                    #     path = imageOutput + "/train-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex) +"e"+str(finalEpoch)
-                    #     print( "))))))) executing single evaluation on ", path, "-", k )
-                    #     train_kendall, train_r2, train_f1 = evaluate_single( g, device, model, path )
-                    #     print( "Single Train Kendall {:.4f}".format( train_kendall ) )
-                    #     print( "Single Train R2 {:.4f}".format( train_r2 ) )
-                    #     print( "Single Train f1 {:.4f}".format( train_f1 ) )
                     if not FULLTRAIN:
-                        # #TODO FIX BOTH LOOPS NOT NECESSARY
-                        # # g = val_dataset[0].to( device )
-                        # for n in valid_indices:
-                        #     g = theDataset[ n ].to( device )
-                        #     # path = val_dataset.names[0]
-                        #     path = theDataset.names[ n ]
-                        #     #path = imageOutput + "/valid-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex)+"e"+str(finalEpoch)
-                        #     path = imageOutput + "/valid-" + path +"-testIndex"+ str(test_indices)+"-validIndex"+ str(valid_indices)+"e"+str(finalEpoch)
-                        #     valid_kendall, valid_r2, valid_f1 = evaluate_single( g, device, model, path )
-                        #     print( "Single valid Kendall {:.4f}".format( valid_kendall ) )
-                        #     print( "Single valid R2 {:.4f}".format( valid_r2 ) )
-                        #     print( "Single valid f1 {:.4f}".format( valid_f1 ) )
-
-                        # for n in test_indices:
-                        #     # g = test_dataset[0].to( device )
-                        #     g = theDataset[ n ].to( device )
-                        #     # path = test_dataset.names[0]
-                        #     path = theDataset.names[ n ]
-                        #     # path = imageOutput + "/test-" + path +"-testIndex"+ str(testIndex)+"-validIndex"+ str(validIndex)+"e"+str(finalEpoch)
-                        #     path = imageOutput + "/test-" + path +"-testIndex"+ str(test_indices)+"-validIndex"+ str(valid_indices)+"e"+str(finalEpoch)
-                        #     test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
-                        #     print( "Single test Kendall {:.4f}".format( test_kendall ) )
-                        #     print( "Single test R2 {:.4f}".format( test_r2 ) )
-                        #     print( "Single test f1 {:.4f}".format( test_f1 ) )
-                        valid_kendall, valid_r2, valid_f1 = evaluate_in_batches( valid_dataloader, device, model )
                         test_kendall, test_r2, test_f1    = evaluate_in_batches( test_dataloader,  device, model )
                     else:
                         test_kendall = test_r2 = test_f1 = valid_kendall = valid_r2 = valid_f1 = torch.tensor([0])
                     train_kendall, train_r2, train_f1 = evaluate_in_batches( train_dataloader, device, model )
+
+                    # TODO: improve this, problem when accessing each graph name with batched graphs
+                    if DRAWOUTPUTS: 
+                        for n in test_indices:
+                            g = theDataset[ n ].to( device )
+                            path = theDataset.names[ n ]
+                            path = imageOutput + "/test-" + path +"-testIndex"+ str(test_indices)+"-e"+str(finalEpoch)+"-feat"+str(ablationIter)
+                            test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
+                            print( "Single test Kendall {:.4f}".format( test_kendall ) )
+                        for n in train_indices:
+                            g = theDataset[ n ].to( device )
+                            path = theDataset.names[ n ]
+                            path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(ablationIter)
+                            test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
+                            print( "Single train Kendall {:.4f}".format( test_kendall ) )
+                        
                     print( "Total Train Kendall {:.4f}".format( train_kendall ) )
                     print( "Total Train R2 {:.4f}".format( train_r2 ) )
                     print( "Total Train f1 {:.4f}".format( train_f1 ) )
@@ -1446,47 +1269,41 @@ if __name__ == '__main__':
                 print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n", flush = True )
 
                 kendallTest.append ( test_kendall.item()  )
-                kendallValid.append( valid_kendall.item() )
                 kendallTrain.append( train_kendall.item() )
                 #print( "val_dataset.getNames()", val_dataset.getNames(), "test_dataset.getNames()", test_dataset.getNames() )
                 with open( summary, 'a' ) as f:
-                    # f.write( str( testIndex ) + ","+str( validIndex )+","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch )+"," )
-                    f.write( str( test_indices ) + ","+str( valid_indices )+","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch )+"," )
-                    # f.write( ";".join(map(str, val_dataset.getNames() ) ) +","+ ";".join(map(str, test_dataset.getNames() ) ) +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() ))
-                    f.write( "; ".join( theDataset.getNames()[i] for i in valid_indices ) +","+ "; ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( train_kendall.item() ) +","+ str( valid_kendall.item() ) +","+ str( test_kendall.item() ))
-                    f.write( "," + str( train_r2.item() ) +","+ str( valid_r2.item() ) +","+ str( test_r2.item() ) )  #+"\n")
-                    f.write( "," + str( train_f1.item() ) +","+ str( valid_f1.item() ) +","+ str( test_f1.item() )  +"\n")
+                    f.write( str( train_indices ) +","+ str( test_indices ) + ",,"+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch )+"," )
+                    f.write( ","+ "; ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( train_kendall.item() ) +",,"+ str( test_kendall.item() ))
+                    f.write( "," + str( train_r2.item() ) +",,"+ str( test_r2.item() ) )  #+"\n")
+                    f.write( "," + str( train_f1.item() ) +",,"+ str( test_f1.item() )  +"\n")
 
                 del model
-                # del train_dataset
-                # del val_dataset
-                # del test_dataset
                 del train_dataloader
-                del valid_dataloader
                 del test_dataloader
                 torch.cuda.empty_cache()
                 if FULLTRAIN:
                     break
                     break
             with open( summary, 'a' ) as f:
-                f.write( ",,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+str( sum( kendallValid ) / len( kendallValid ) )+","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
-                f.write( ",,,,,,,Median ," + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallValid ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
+                # f.write( ",,,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+str( sum( kendallValid ) / len( kendallValid ) )+","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
+                # f.write( ",,,,,,,,Median ," + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallValid ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
+                f.write( ",,,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +",,"+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
+                f.write( ",,,,,,,,Median ," + str( statistics.median( kendallTrain ) ) +",,"+ str( statistics.median( kendallTest ) ) +"\n" )
             with open( ablationResult, 'a' ) as f:
                 f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") )
-                f.write( ","+ str( sum( kendallValid ) / len( kendallValid ) ) +","+ (str(statistics.stdev(kendallValid)) if len(kendallValid) > 1 else "N/A") )
+                # f.write( ","+ str( sum( kendallValid ) / len( kendallValid ) ) +","+ (str(statistics.stdev(kendallValid)) if len(kendallValid) > 1 else "N/A") )
+                f.write( ",,N/A") 
                 f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n" )
-
-            del theDataset
+                
             folder_name = f"{str(ablationIter)}-{mainIteration}"
-            # os.mkdir( folder_name )
-            # shutil.move( "runs", os.path.join( folder_name, "runs" ) )
-            # shutil.move( "image_outputs", os.path.join( folder_name, "image_outputs" ) )
-            shutil.move( "image_outputs", folder_name )
+            shutil.move( imageOutput, folder_name )
+            del theDataset
+            
         with open( ablationResult, 'a' ) as f:
             f.write("\n")
     endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 1 )
     with open( summary, 'a' ) as f:
-        f.write( ",,featCombinations:"+ str( len( ablationList ) )+"," + str( endTimeAll ) + " hours" ) 
+        f.write( ",,,featCombinations:"+ str( len( ablationList ) )+"," + str( endTimeAll ) + " hours" ) 
     print("\n\n All finished, runtime:", endTimeAll, "hours" )
 
     folders = [folder for folder in os.listdir() if os.path.isdir(folder)]
