@@ -44,7 +44,7 @@ print( "torch.cuda.device(0):", torch.cuda.device(0) )
 print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 print( "dgl.__version_:", dgl.__version__ )
 
-mainMaxIter      = 2
+mainMaxIter      = 1
 FULLTRAIN        = False
 num_folds        = 4
 MANUALABLATION   = True
@@ -1249,21 +1249,18 @@ if __name__ == '__main__':
                             g = theDataset[ n ].to( device )
                             path = theDataset.names[ n ]
                             path = imageOutput + "/test-" + path +"-testIndex"+ str(test_indices)+"-e"+str(finalEpoch)+"-feat"+str(ablationIter)
-                            test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
-                            print( "Single test Kendall {:.4f}".format( test_kendall ) )
+                            evaluate_single( g, device, model, path ) #using only for drawing for now
                         for n in train_indices:
                             g = theDataset[ n ].to( device )
                             path = theDataset.names[ n ]
                             path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(ablationIter)
-                            test_kendall, test_r2, test_f1 = evaluate_single( g, device, model, path )
-                            print( "Single train Kendall {:.4f}".format( test_kendall ) )
-                        
-                    print( "Total Train Kendall {:.4f}".format( train_kendall ) )
-                    print( "Total Train R2 {:.4f}".format( train_r2 ) )
-                    print( "Total Train f1 {:.4f}".format( train_f1 ) )
-
+                            evaluate_single( g, device, model, path ) #using only for drawing for now
                 else:
                     test_kendall= test_r2= test_f1= train_kendall= train_r2= train_f1= valid_kendall= valid_r2= valid_f1= torch.tensor([0])
+
+                print( "Total Train Kendall {:.4f}".format( train_kendall ) )
+                print( "Total Train R2 {:.4f}".format( train_r2 ) )
+                print( "Total Train f1 {:.4f}".format( train_f1 ) )
                 print( "\n###############################\n## FinalEvalRuntime:", round( ( time.time() - startTimeEval ) / 60, 1) , "min ##\n###############################\n" )
                 iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
                 print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n", flush = True )
@@ -1285,13 +1282,10 @@ if __name__ == '__main__':
                     break
                     break
             with open( summary, 'a' ) as f:
-                # f.write( ",,,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+str( sum( kendallValid ) / len( kendallValid ) )+","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
-                # f.write( ",,,,,,,,Median ," + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallValid ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
                 f.write( ",,,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +",,"+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
                 f.write( ",,,,,,,,Median ," + str( statistics.median( kendallTrain ) ) +",,"+ str( statistics.median( kendallTest ) ) +"\n" )
             with open( ablationResult, 'a' ) as f:
                 f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") )
-                # f.write( ","+ str( sum( kendallValid ) / len( kendallValid ) ) +","+ (str(statistics.stdev(kendallValid)) if len(kendallValid) > 1 else "N/A") )
                 f.write( ",,N/A") 
                 f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n" )
                 
