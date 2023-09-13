@@ -44,7 +44,7 @@ print( "torch.cuda.device(0):", torch.cuda.device(0) )
 print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 print( "dgl.__version_:", dgl.__version__ )
 
-mainMaxIter      = 1
+mainMaxIter      = 10
 FULLTRAIN        = False
 num_folds        = 4
 MANUALABLATION   = True
@@ -60,13 +60,13 @@ minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
-patience = 40  # Number of epochs without improvement to stop training
+patience = 35  # Number of epochs without improvement to stop training
 #split = [ 0.9, 0.05, 0.05 ]
 # TandV = 1
 accumulation_steps = 4
 
 DEBUG         = 0 #1 for evaluation inside train
-DRAWOUTPUTS   = True
+DRAWOUTPUTS   = False
 CUDA          = True
 DOLEARN       = True
 SKIPFINALEVAL = False #TODO True
@@ -1071,7 +1071,7 @@ if __name__ == '__main__':
     with open( summary, 'w' ) as f:
         f.write("")
     with open( ablationResult, 'w' ) as f:
-        f.write( "Featuers,Train-Mean,Train-SD,Valid-Mean,Valid-SD,Test-Mean,Test-SD\n" ) 
+        f.write( "Features,Train-Mean,Train-SD,Valid-Mean,Valid-SD,Test-Mean,Test-SD\n" ) 
     if os.path.exists( "runs" ):
         shutil.rmtree( "runs" )
 
@@ -1096,7 +1096,8 @@ if __name__ == '__main__':
             ablationList += list( combinations( listFeats, combAux ) )
             print( "ablationList:", len( ablationList ), ablationList )
     else:
-        ablationList = [('eigen','pageRank','inDegree','outDegree'), ('pageRank','inDegree','outDegree'), ('eigen','pageRank','outDegree'), ('inDegree','outDegree'), ('pageRank','outDegree')]
+        ablationList = [ ('type',) ]
+        # ablationList = [('eigen','pageRank','inDegree','outDegree'), ('pageRank','inDegree','outDegree'), ('eigen','pageRank','outDegree'), ('inDegree','outDegree'), ('pageRank','outDegree')]
         # ablationList =  [ ('inDegree','outDegree','eigen','pageRank', 'type' ) ]
         # ablationList += [ ('eigen',), ('pageRank',), ('inDegree',), ( 'outDegree',), ('type',) ]
         # ablationList += [ ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
@@ -1145,19 +1146,18 @@ if __name__ == '__main__':
             kendallValid = []
             kendallTrain = []
 
-            # if TandV == 1:
-            #     testIterable  = [ 7 ]
-            #     validIterable = list( range( 0, len( listDir ) ) )
-            # if TandV == 2:
-            #     testIterable  = list( range( 0, len( listDir ) -1, 2 ) )
-            #     # validIterable = random.sample( range( len( listDir ) ), int( len( listDir ) / 2 ) )
-            #     validIterable = list( range( 0, len( listDir ) ) )
-
-            # print( "testIterable:", testIterable )
-            # print( "validIterable:", validIterable )
             theDataset = DataSetFromYosys( listDir, ablationIter )#, mode='train' )
-            kf = KFold( n_splits = num_folds )
-            for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
+            # kf = KFold( n_splits = num_folds )
+            # for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
+            if True:
+                fold = 0
+                # LASCAS comparison, same as HUAWEI
+                # train_indices = [i for i in range(len(theDataset)) if i !=2 and i !=4] # remove swerv and bp_be_top
+                # test_indices = [2]
+
+                # HUAWEI's ablation, only Black_parrot
+                train_indices = [7] 
+                test_indices = [i for i in range(len(theDataset)) if i != 7 and i != 4 ]  #remove bp_be_top and black_parrot
                 print(f"Fold {fold+1}/{num_folds}")
                 #train_indices, valid_indices = train_indices[:-len(test_indices)], train_indices[-len(test_indices):]
                         
@@ -1165,11 +1165,6 @@ if __name__ == '__main__':
                 print( "##################################################################################" )
                 print( "#################### New CrossValid iteration  ###################################" )
                 print( "##################################################################################" )
-               
-                # train_dataset = DataSetFromYosys( currentDir, ablationIter, mode='train' )
-                # val_dataset   = DataSetFromYosys( currentDir, ablationIter, mode='valid' )
-                # test_dataset  = DataSetFromYosys( currentDir, ablationIter, mode='test'  )
-
                 # if DRAWOUTPUTS:
                 #     complete_dataset = train_dataset
                 #     complete_dataset.appendGraph( val_dataset )
@@ -1177,7 +1172,6 @@ if __name__ == '__main__':
                 #     complete_dataset.drawCorrelationMatrices()
                 #     del complete_dataset
 
-                # features = train_dataset[0].ndata[ featName ]
                 features = theDataset[0].ndata[ featName ]
                 if( features.dim() == 1 ):
                     features = features.unsqueeze(1)
@@ -1267,9 +1261,8 @@ if __name__ == '__main__':
 
                 kendallTest.append ( test_kendall.item()  )
                 kendallTrain.append( train_kendall.item() )
-                #print( "val_dataset.getNames()", val_dataset.getNames(), "test_dataset.getNames()", test_dataset.getNames() )
                 with open( summary, 'a' ) as f:
-                    f.write( str( train_indices ) +","+ str( test_indices ) + ",,"+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch )+"," )
+                    f.write( str( train_indices ).replace(',', '') +","+ str( test_indices ).replace(',', ';') + ",,"+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch )+"," )
                     f.write( ","+ "; ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( train_kendall.item() ) +",,"+ str( test_kendall.item() ))
                     f.write( "," + str( train_r2.item() ) +",,"+ str( test_r2.item() ) )  #+"\n")
                     f.write( "," + str( train_f1.item() ) +",,"+ str( test_f1.item() )  +"\n")
@@ -1281,21 +1274,24 @@ if __name__ == '__main__':
                 if FULLTRAIN:
                     break
                     break
+                # K fold loop end here
             with open( summary, 'a' ) as f:
                 f.write( ",,,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +",,"+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
-                f.write( ",,,,,,,,Median ," + str( statistics.median( kendallTrain ) ) +",,"+ str( statistics.median( kendallTest ) ) +"\n" )
+                f.write( ",,,,,,,,Median,"  + str( statistics.median( kendallTrain ) ) +",,"+ str( statistics.median( kendallTest ) ) +"\n" )
+                f.write( ",,,,,,,,Std Dev," + ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) +",,"+ ( str( statistics.stdev( kendallTest ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
             with open( ablationResult, 'a' ) as f:
-                f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") )
+                f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) )
                 f.write( ",,N/A") 
-                f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n" )
+                f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ ( str( statistics.stdev( kendallTest ) ) if len( kendallTest ) > 1 else "N/A" ) + "\n" )
                 
             folder_name = f"{str(ablationIter)}-{mainIteration}"
             shutil.move( imageOutput, folder_name )
             del theDataset
+            # ablation loop end here
             
         with open( ablationResult, 'a' ) as f:
             f.write("\n")
-    endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 1 )
+    endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 2 )
     with open( summary, 'a' ) as f:
         f.write( ",,,featCombinations:"+ str( len( ablationList ) )+"," + str( endTimeAll ) + " hours" ) 
     print("\n\n All finished, runtime:", endTimeAll, "hours" )
@@ -1310,9 +1306,6 @@ if __name__ == '__main__':
         new_counter = 0
     folder_name = str(new_counter)
     os.mkdir(folder_name)
-    # for item in os.listdir():
-    #     if not re.match(pattern, item) and item != folder_name:
-    #         shutil.move( item, os.path.join( folder_name, item ) )
     excluded_folders = ["dataSet", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset", "asap7" ]
     
     for item in os.listdir():
