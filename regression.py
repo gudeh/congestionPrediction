@@ -44,9 +44,9 @@ print( "torch.cuda.device(0):", torch.cuda.device(0) )
 print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 print( "dgl.__version_:", dgl.__version__ )
 
-mainMaxIter      = 10
-FULLTRAIN        = False
-num_folds        = 4
+mainMaxIter      = 2
+FULLTRAIN        = False # False = Kfold
+num_folds        = 4 
 MANUALABLATION   = True
 listFeats = [ 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type' ] #, 'closeness', 'between' ] # logicDepth
 featName = 'feat' #listFeats[0]
@@ -55,8 +55,8 @@ rawFeatName = 'type' #TODO: change to listFeats[0]
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-maxEpochs = 250
-minEpochs = 150
+maxEpochs = 2
+minEpochs = 1
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
@@ -222,58 +222,17 @@ def writeDFrameData( listDir, csvName, outName ):
 
 
 class DataSetFromYosys( DGLDataset ):
-    def __init__( self, listDir, ablationList ):#, mode='train' ):    
-        # if len( split ) != 3 or sum( split ) != 1.0:
-	#         print("!!!!ERROR: fatal, unexpected split sizes." )
-	#         return	       
-            
+    def __init__( self, listDir, ablationList ):
         self.graphPaths = []
         self.graphs = []
         self.names = []
         self.allNames = []
-        #self.mode = mode
         self.ablationFeatures = ablationList
         self.namesOfFeatures = []
 
         for idx in range( len( listDir ) ):
             self.allNames.append( str( listDir[idx] ).rsplit( '/' )[-1] )
             print( self.allNames[idx],",", end="" )
-    #        train, validate, test = np.split(files, [int(len(files)*0.8), int(len(files)*0.9)])
-        # firstSlice  = math.ceil( len( listDir )*split[0] ) - 1
-        # secondSlice = math.ceil( len( listDir )*split[1] + firstSlice )      
-        # firstSlice  = 0
-        # secondSlice = 0
-        # if( len( listDir ) == 1 ):
-	#         firstSlice  = 0
-	#         secondSlice = 0
-        # if( len( listDir ) == 2 ):
-	#         firstSlice  = 1
-	#         secondSlice = 1
-        # if( len( listDir ) > 2 ):
-        #     if TandV == 1:
-        #         firstSlice  = -2
-        #         secondSlice = -1
-        #     if TandV == 2:
-        #         firstSlice  = -3
-        #         secondSlice = -2
-         
-        # print( "\nlen(listDir)",len(listDir), flush = True)
-        # print( "firstSlice:", firstSlice, "\nsecondSlice", secondSlice )
-        # if mode == 'train':
-        #     if FULLTRAIN:
-        #         print("all dataset as train!")
-        #         self.graphPaths = listDir
-        #         self.names      = self.allNames
-        #     else:
-        #         self.graphPaths = listDir [ : firstSlice ]
-        #         self.names      = self.allNames[ : firstSlice ]
-        # elif mode == 'valid':
-        #     self.graphPaths = listDir [ firstSlice: secondSlice ]
-        #     self.names      = self.allNames[ firstSlice: secondSlice ]
-        # elif mode == 'test':
-        #     self.graphPaths = listDir [ secondSlice : ]
-        #     self.names      = self.allNames[ secondSlice : ]
-
         self.graphPaths = listDir
         self.names      = self.allNames
 
@@ -1096,8 +1055,8 @@ if __name__ == '__main__':
             ablationList += list( combinations( listFeats, combAux ) )
             print( "ablationList:", len( ablationList ), ablationList )
     else:
-        ablationList = [ ('type',) ]
-        # ablationList = [('eigen','pageRank','inDegree','outDegree'), ('pageRank','inDegree','outDegree'), ('eigen','pageRank','outDegree'), ('inDegree','outDegree'), ('pageRank','outDegree')]
+        #ablationList = [ ('type',) ]
+         ablationList = [('eigen','pageRank','inDegree','outDegree'), ('pageRank','inDegree','outDegree'), ('eigen','pageRank','outDegree'), ('inDegree','outDegree'), ('pageRank','outDegree')]
         # ablationList =  [ ('inDegree','outDegree','eigen','pageRank', 'type' ) ]
         # ablationList += [ ('eigen',), ('pageRank',), ('inDegree',), ( 'outDegree',), ('type',) ]
         # ablationList += [ ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
@@ -1147,17 +1106,20 @@ if __name__ == '__main__':
             kendallTrain = []
 
             theDataset = DataSetFromYosys( listDir, ablationIter )#, mode='train' )
-            # kf = KFold( n_splits = num_folds )
-            # for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
-            if True:
-                fold = 0
+            kf = KFold( n_splits = num_folds )
+            for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
+############# MANUAL EXPERIMENTS #############
+            # if True:
+            #     fold = 0
                 # LASCAS comparison, same as HUAWEI
                 # train_indices = [i for i in range(len(theDataset)) if i !=2 and i !=4] # remove swerv and bp_be_top
                 # test_indices = [2]
 
                 # HUAWEI's ablation, only Black_parrot
-                train_indices = [7] 
-                test_indices = [i for i in range(len(theDataset)) if i != 7 and i != 4 ]  #remove bp_be_top and black_parrot
+                # train_indices = [7] 
+                # test_indices = [i for i in range(len(theDataset)) if i != 7 and i != 4 ]  #remove bp_be_top and black_parrot
+##############################################
+
                 print(f"Fold {fold+1}/{num_folds}")
                 #train_indices, valid_indices = train_indices[:-len(test_indices)], train_indices[-len(test_indices):]
                         
@@ -1181,28 +1143,9 @@ if __name__ == '__main__':
                 model = GAT( in_size, 256, out_size, heads=[4,4,6] ).to( device )
                 # model = GAT( in_size, 128, out_size, heads=[4,4,6]).to( device )
                 # model = SAGE( in_feats = in_size, hid_feats = 125, out_feats  = out_size ).to( device )
-
                 print( "\n###################" )
                 print( "## MODEL DEFINED ##"   )
                 print( "###################\n", flush = True )
-
-                # sampler = dgl.dataloading.MultiLayerFullNeighborSampler(2)
-                # for k in range( len( train_dataset ) ):
-                #     g = train_dataset[k].to( device )
-                #     train_dataloader = DataLoader( g, g.nodes, graph_sampler = sampler, batch_size=1, use_uva = True, device = device )
-                # valid_dataloader   = DataLoader( val_dataset,   batch_size=1 )
-                # test_dataloader  = DataLoader( test_dataset,  batch_size=1 ) 
-
-                # Create the samplers
-                # train_sampler = RandomSampler(train_dataset)  # Randomly sample from the training dataset
-                #sampler = NeighborSampler( g, [10,5,4], shuffle=True, num_workers=4)
-
-                # val_sampler = torch.utils.data.SequentialSampler(val_dataset)  # Iterate through the validation dataset sequentially
-                # test_sampler = torch.utils.data.SequentialSampler(test_dataset)  # Iterate through the test dataset sequentially
-
-                # train_dataloader = GraphDataLoader( train_dataset, batch_size = 1 )#5 , sampler = train_sampler )
-                # valid_dataloader   = GraphDataLoader( val_dataset,   batch_size = 1 )
-                # test_dataloader  = GraphDataLoader( test_dataset,  batch_size = 1 )
                 print( "train_indices:", type( train_indices ), train_indices )
                 #print( "valid_indices:", type( valid_indices ), valid_indices )
                 print( "test_indices:", type( test_indices ), test_indices )
