@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import csv
 import re # handle type to category names AND_X1
@@ -19,6 +20,7 @@ from matplotlib.patches import Rectangle
 from matplotlib import cm
 import matplotlib.colorbar as mcb
 import matplotlib.colors as mcolors
+import matplotlib.patches as patches
 
 import torch
 import torch.nn as nn
@@ -38,15 +40,10 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-print( "torch.cuda.is_available():", torch.cuda.is_available() )
-print( "torch.cuda.device_count():", torch.cuda.device_count() )
-print( "torch.cuda.device(0):", torch.cuda.device(0) )
-print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
-print( "dgl.__version_:", dgl.__version__ )
-
-mainMaxIter      = 2
-FULLTRAIN        = False # False = Kfold
-num_folds        = 4 
+mainMaxIter      = 1
+FULLTRAIN        = False
+DOKFOLD          = True
+num_folds        = 4
 MANUALABLATION   = True
 listFeats = [ 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type' ] #, 'closeness', 'between' ] # logicDepth
 featName = 'feat' #listFeats[0]
@@ -54,25 +51,34 @@ rawFeatName = 'type' #TODO: change to listFeats[0]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
+dsFolderName = 'nangate'
+MIXEDTEST     = False
+dsFolderName2 = 'asap7'
 
-maxEpochs = 2
-minEpochs = 1
+maxEpochs = 250
+minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
 patience = 35  # Number of epochs without improvement to stop training
-#split = [ 0.9, 0.05, 0.05 ]
-# TandV = 1
 accumulation_steps = 4
 
-DEBUG         = 0 #1 for evaluation inside train
-DRAWOUTPUTS   = False
-CUDA          = True
-DOLEARN       = True
-SKIPFINALEVAL = False #TODO True
+DEBUG           = 0 #1 for evaluation inside train
+DRAWOUTPUTS     = False
+DRAWCORRMATRIX  = False
+DRAWGRAPHDATA   = True
+CUDA            = True
+DOLEARN         = False
+SKIPFINALEVAL   = False #TODO True
 
 SELF_LOOP = True
 COLAB     = False
+
+print( "torch.cuda.is_available():", torch.cuda.is_available() )
+print( "torch.cuda.device_count():", torch.cuda.device_count() )
+print( "torch.cuda.device(0):", torch.cuda.device(0) )
+print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
+print( "dgl.__version_:", dgl.__version__ )
 
 
 def getF1( tp, tn, fp, fn ):
@@ -233,16 +239,17 @@ class DataSetFromYosys( DGLDataset ):
         for idx in range( len( listDir ) ):
             self.allNames.append( str( listDir[idx] ).rsplit( '/' )[-1] )
             print( self.allNames[idx],",", end="" )
+    #        train, validate, test = np.split(files, [int(len(files)*0.8), int(len(files)*0.9)])
+
         self.graphPaths = listDir
         self.names      = self.allNames
 
         super().__init__( name='mydata_from_yosys' )
 
-    def drawCorrelationMatrices( self ):
+    def drawCorrelationPerGraph( self, fileName ):
         num_graphs = len( self.graphs )
         num_rows = int( np.sqrt( num_graphs ) )
         num_cols = int( np.ceil( num_graphs / num_rows ) )
-
         fig, axes = plt.subplots( num_rows, num_cols, figsize = ( 12, 8 ) )
         for i, graph in enumerate( self.graphs ):
             tensor = graph.ndata[ featName ]
@@ -268,33 +275,130 @@ class DataSetFromYosys( DGLDataset ):
                             ha = "center", va = "center", color = "white" )
         fig.tight_layout()
         cbar = fig.colorbar( im, ax=axes.ravel().tolist() )
-        plt.savefig( "correlation-individual.png" )
+        plt.savefig( "corrMatrix-"+fileName+".png" )
         plt.close( 'all' )
         plt.clf()
-
-
-        # # concatenated_tensor = np.hstack( [ graph.ndata[ featName ].T for graph in self.graphs ] )
-        # tensors = [graph.ndata[featName] for graph in self.graphs]
-        # num_features = tensors[0].shape[1]
-        # print( "num_features:", num_features )
-        # # concatenated_tensor = np.hstack(tensors)
-        # # correlation_matrix = np.corrcoef( concatenated_tensor, rowvar = False )
-        # concatenated_tensor = torch.cat( tensors, dim=1)
-        # transposed_tensor = concatenated_tensor.T
-        # correlation_coefficient = torch.corrcoef( transposed_tensor[0], transposed_tensor[1] )[0, 1]
-        # plt.imshow( correlation_matrix, cmap = 'viridis', interpolation = 'nearest' )
-        # plt.colorbar()
-        # plt.title( "Combined Correlation Matrix" )
-        # plt.xticks(np.arange(len(self.namesOfFeatures) * len(self.graphs)), self.namesOfFeatures * len(self.graphs), rotation=45, ha='right')
-        # plt.yticks(np.arange(len(self.namesOfFeatures) * len(self.graphs)), self.namesOfFeatures * len(self.graphs))
-        # for i in range(len(self.namesOfFeatures) * len(self.graphs)):
-        #     for j in range(len(self.namesOfFeatures) * len(self.graphs)):
-        #         plt.text(j, i, format(correlation_matrix[i, j], ".2f"),
-        #                  ha="center", va="center", color="white")
-        # plt.savefig( "correlation-combined.png" )
-        # plt.close( 'all' )
-        # plt.clf()
         
+    def drawSingleCorrelationMatrix( self, fileName ):
+        print( "Start: drawSingleCorrelationMatrix!" )
+        num_graphs = len(self.graphs)
+        all_data = []
+        for graph in self.graphs:
+            tensor = graph.ndata[featName]
+            reshape = graph.ndata[labelName].view(-1, 1)
+            tensor = torch.cat((tensor, reshape), 1)
+            all_data.append(tensor)
+        combined_data = torch.cat(all_data, 0)
+        correlation_matrix = np.corrcoef(combined_data, rowvar=False)
+        fig, ax = plt.subplots(figsize=(12, 8))
+        im = ax.imshow(correlation_matrix, cmap='turbo', interpolation='nearest', vmin=-1, vmax=1)
+        ax.set_title("Combined Correlation Matrix")
+        ax.set_xticks(np.arange(len(self.namesOfFeatures) + 1))
+        ax.set_yticks(np.arange(len(self.namesOfFeatures) + 1))
+        ax.set_xticklabels(self.namesOfFeatures + [labelName], rotation=30)
+        ax.set_yticklabels(self.namesOfFeatures + [labelName])        
+        for j in range(len(self.namesOfFeatures) + 1):
+            for k in range(len(self.namesOfFeatures) + 1):
+                ax.text(k, j, format(correlation_matrix[j, k], ".1f"),
+                        ha="center", va="center", color="white")
+        fig.tight_layout()
+        cbar = fig.colorbar(im)
+        plt.savefig("corrMatrix-" + fileName + ".png")
+        plt.close('all')
+        plt.clf()
+        print( "End: drawSingleCorrelationMatrix!" )
+        
+    def drawHeatCentrality(self, fileName, clip_min=None, clip_max=None):
+        print("self.namesOfFeatures:", self.namesOfFeatures)
+        for g in self.graphs:
+            designName = g.name
+            print("************* INDSIDE DRAWHEAT CENTRALITY *****************")
+            print("Circuit:", designName)
+            print("featName:", featName)
+            print("g.ndata[featName]:", type(g.ndata[featName]), g.ndata[featName].shape, flush=True)
+            positions = g.ndata["position"].to(torch.float32).to("cpu")
+            feat_values = g.ndata[featName]
+            num_columns = feat_values.shape[1]  # Get the number of columns in the 2D tensor
+            if num_columns != len(self.namesOfFeatures):
+                print("ERROR: namesOfFeatures and num_columns with different sizes in drawHeatCentrality!!")
+            fig, axes = plt.subplots(1, num_columns, figsize=(6 * num_columns, 6))
+            for i, ax in enumerate(axes):
+                dummy_image = ax.imshow([[0, 1]], cmap='coolwarm')
+                feat_values_i = feat_values[:, i]
+                clip_min = feat_values_i.min()
+                clip_max = feat_values_i.max()
+                feat_values_i = np.clip(feat_values_i, clip_min, clip_max)
+                for pos, feat_value in zip(positions, feat_values_i):
+                    xmin, ymin, xmax, ymax = pos.tolist()
+                    rect = Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, facecolor=cm.RdYlGn((feat_value - clip_min) / (clip_max - clip_min)))
+                    ax.add_patch(rect)
+                ax.set_xlim(positions[:, 0].min() - 1, positions[:, 2].max() + 4)
+                ax.set_ylim(positions[:, 1].min() - 1, positions[:, 3].max() + 1)
+                ax.set_title(self.namesOfFeatures[i])
+                ax.set_aspect('equal')  # Set aspect ratio to equal for proper rectangle visualization
+            cax = fig.add_axes([0.15, 0.05, 0.7, 0.03])  # Define colorbar position (adjust as needed)
+            cmap = cm.RdYlGn  # Use the same colormap as your rectangles
+            cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
+            cbar.set_label('Reference Colorbar')
+            plt.savefig(designName + "-" + fileName)
+            plt.close('all')
+            for ax in axes:
+                ax.clear()
+            plt.clf()
+
+    def drawDataAnalysis( self, fileName ):
+        print("************* INDSIDE DRAW DATA ANALYSIS *****************", flush=True)
+        agg_features = [graph.ndata[featName] for graph in self.graphs]
+        agg_labels = [graph.ndata[labelName] for graph in self.graphs]
+        num_features = agg_features[0].shape[1]
+        num_labels = 1  # Assuming there's only one label column
+        num_rows = math.ceil((num_features + num_labels) / 2)
+        plt.figure(figsize=(12, 6))
+        for i in range( num_features ):
+            plt.subplot(num_rows, 2, i + 1)
+            sns.histplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), kde=True, bins=20)
+            #sns.boxplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy())
+            plt.xlabel(self.namesOfFeatures[i])
+            plt.ylabel('Count')
+            plt.title(f'Aggregated Data Distribution for '+self.namesOfFeatures[i])
+        plt.subplot(num_rows, 2, num_rows * 2)  # Label in a separate subplot
+        sns.histplot(torch.cat(agg_labels).cpu().numpy(), kde=True)
+        plt.xlabel('Labels')
+        plt.ylabel('Count')
+        plt.title('Aggregated Data Distribution for Labels')
+        plt.suptitle('Aggregated Data Distribution for All Graphs')
+        plt.tight_layout()
+        plt.savefig("aggregatedDataAnalysis-" + fileName + ".png")
+        plt.close('all')
+        plt.clf()
+
+    def drawDataAnalysisForEachGraph(self, filePrefix):
+        print("************* INSIDE DRAW DATA ANALYSIS FOR EACH GRAPH *****************", flush=True)
+        for i, graph in enumerate(self.graphs):
+            print( "graph.name:", graph.name )
+            agg_features = graph.ndata[featName]
+            agg_labels = graph.ndata[labelName]
+            num_features = agg_features.shape[1]
+            num_labels = 1  # Assuming there's only one label column
+            num_rows = math.ceil((num_features + num_labels) / 2)
+            plt.figure(figsize=(12, 6))
+            for j in range(num_features):
+                plt.subplot(num_rows, 2, j + 1)
+                sns.histplot(agg_features[:, j].cpu().numpy(), kde=True, bins=20)
+                plt.xlabel(self.namesOfFeatures[j])
+                plt.ylabel('Count')
+                plt.title(f'Data Distribution for {self.namesOfFeatures[j]} ({graph.name})')
+            plt.subplot(num_rows, 2, num_rows * 2)  # Label in a separate subplot
+            sns.histplot(agg_labels.cpu().numpy(), kde=True)
+            plt.xlabel('Labels')
+            plt.ylabel('Count')
+            plt.title(f'Data Distribution for Labels ({graph.name})')
+            plt.suptitle(f'Data Distribution for {graph.name}')
+            plt.tight_layout()
+            plt.savefig(f"{filePrefix}-({graph.name}).png")
+            plt.close('all')
+            plt.clf()
+
     def process( self ):
         for path in self.graphPaths:
 	        graph = self._process_single( path )
@@ -356,7 +460,7 @@ class DataSetFromYosys( DGLDataset ):
         print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
         #print( "\tself.graph.ndata\n", self.graph.ndata )		
         self.graph.remove_nodes( idsToRemove )
-        # self.drawData = self.drawData.drop( idsToRemove.tolist(), axis=1 )        
+        # self.draDawta = self.drawData.drop( idsToRemove.tolist(), axis=1 )        
         isolated_nodes = ( ( self.graph.in_degrees() == 0 ) & ( self.graph.out_degrees() == 0 ) ).nonzero().squeeze(1)
         print( "isolated_nodes:", isolated_nodes.shape ) #, "\n", isolated_nodes )
         self.graph.remove_nodes( isolated_nodes )
@@ -614,47 +718,6 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     plt.close( 'all' )
     plt.clf()
 
-################################# VALUES PLOT ########################################################
-    # WORKING!
-    # types = graph.ndata[ featName ].to( torch.float32 ).to( "cpu" )
-    # predict_aux = predict_normalized[:10000].to( "cpu" )
-    # label_aux   = label_normalized  [:10000].to( "cpu" )
-    # plt.scatter(range(len(predict_aux ) ), predict_aux, color='blue', label='Predict')
-    # plt.scatter(range(len(label_aux ) ), label_aux, color='red', label='Label')
-    # plt.xlabel('Index')
-    # plt.ylabel('Value')
-    # plt.title('Predicted vs. Labeled Values')
-    # plt.legend()
-    
-    # auxName = drawHeatName.replace( "/", "/valuesPlot/", 1 )
-    # print( "auxName:", auxName )
-    # plt.savefig( auxName )
-    # plt.close( 'all' )
-    # plt.clf()
-######################################################################################################
-    
-################################# RESIDUAL ########################################################    
-
-    # WORKING!
-    # residual = label_normalized - predict_normalized
-    # residual_np = residual.to("cpu").numpy()
-    # residual_np = residual_np[~np.isnan(residual_np)]
-    # if residual_np.size > 0:  # Check if the filtered array is not empty
-    #     plt.figure(figsize=(8, 6))
-    #     plt.hist(residual_np, bins=50, edgecolor='black')
-    #     plt.xlabel('Index')
-    #     plt.ylabel('Value')
-    #     plt.title('Residual Plot')
-    #     plt.xlim( -1, 1 )
-    #     plt.legend()
-    
-    # auxName = drawHeatName.replace( "/", "/errorTable/", 1 )
-    # print( "auxName:", auxName )
-    # plt.savefig( auxName )
-    # plt.close( 'all' )
-    # plt.clf()
-######################################################################################################
-
 ############################# HEATMAPS ###############################################################
     positions = graph.ndata[ "position" ].to( torch.float32 ).to( "cpu" )
     if not torch.equal( graph.ndata[ labelName ].to(device).to( torch.float32 ), tensorLabel ):
@@ -700,6 +763,47 @@ def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     ax2.clear()
     plt.clf()
 
+######################################################################################################
+
+################################# VALUES PLOT ########################################################
+    # WORKING!
+    # types = graph.ndata[ featName ].to( torch.float32 ).to( "cpu" )
+    # predict_aux = predict_normalized[:10000].to( "cpu" )
+    # label_aux   = label_normalized  [:10000].to( "cpu" )
+    # plt.scatter(range(len(predict_aux ) ), predict_aux, color='blue', label='Predict')
+    # plt.scatter(range(len(label_aux ) ), label_aux, color='red', label='Label')
+    # plt.xlabel('Index')
+    # plt.ylabel('Value')
+    # plt.title('Predicted vs. Labeled Values')
+    # plt.legend()
+    
+    # auxName = drawHeatName.replace( "/", "/valuesPlot/", 1 )
+    # print( "auxName:", auxName )
+    # plt.savefig( auxName )
+    # plt.close( 'all' )
+    # plt.clf()
+######################################################################################################
+    
+################################# RESIDUAL ########################################################    
+
+    # WORKING!
+    # residual = label_normalized - predict_normalized
+    # residual_np = residual.to("cpu").numpy()
+    # residual_np = residual_np[~np.isnan(residual_np)]
+    # if residual_np.size > 0:  # Check if the filtered array is not empty
+    #     plt.figure(figsize=(8, 6))
+    #     plt.hist(residual_np, bins=50, edgecolor='black')
+    #     plt.xlabel('Index')
+    #     plt.ylabel('Value')
+    #     plt.title('Residual Plot')
+    #     plt.xlim( -1, 1 )
+    #     plt.legend()
+    
+    # auxName = drawHeatName.replace( "/", "/errorTable/", 1 )
+    # print( "auxName:", auxName )
+    # plt.savefig( auxName )
+    # plt.close( 'all' )
+    # plt.clf()
 ######################################################################################################
 
 ############################ HISTOGRAMS ##############################################################
@@ -982,7 +1086,7 @@ if __name__ == '__main__':
     if COLAB:
         dsPath = '/content/drive/MyDrive/tese - datasets/dataSet'
     else:
-        dsPath = Path.cwd() / 'dataSet'
+        dsPath = Path.cwd() / dsFolderName
         
     for designPath in Path( dsPath ).iterdir():
 	    if designPath.is_dir() and "runs" not in str( designPath ):
@@ -1021,10 +1125,7 @@ if __name__ == '__main__':
     ##################################################################################
     ##################################################################################
     ##################################################################################
-
-    if not DOLEARN:
-        sys.exit()
-        
+    
     summary = "runSummary.csv"
     ablationResult = "ablationResult.csv"
     with open( summary, 'w' ) as f:
@@ -1055,13 +1156,7 @@ if __name__ == '__main__':
             ablationList += list( combinations( listFeats, combAux ) )
             print( "ablationList:", len( ablationList ), ablationList )
     else:
-        #ablationList = [ ('type',) ]
-         ablationList = [('eigen','pageRank','inDegree','outDegree'), ('pageRank','inDegree','outDegree'), ('eigen','pageRank','outDegree'), ('inDegree','outDegree'), ('pageRank','outDegree')]
-        # ablationList =  [ ('inDegree','outDegree','eigen','pageRank', 'type' ) ]
-        # ablationList += [ ('eigen',), ('pageRank',), ('inDegree',), ( 'outDegree',), ('type',) ]
-        # ablationList += [ ('inDegree','outDegree'), ('inDegree','outDegree', 'type'), ('inDegree','outDegree', 'eigen'), ('inDegree','outDegree', 'pageRank') ]
-        # ablationList += [ ('outDegree','eigen','pageRank'), ('inDegree','eigen','pageRank'), ('inDegree','pageRank'), ('outDegree','pageRank') ]
-        # ablationList += [ ('inDegree','outDegree','eigen','pageRank'), ('inDegree','outDegree','eigen','pageRank','type'), ('type','eigen','pageRank'), ('eigen','pageRank') ]
+        ablationList = [('eigen','pageRank','inDegree','outDegree','type')]
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
     for mainIteration in range( 0, mainMaxIter ):
@@ -1073,7 +1168,12 @@ if __name__ == '__main__':
         ablationKendalls = []
         for ablationIter in ablationList:
             with open( summary, 'a' ) as f:
-                f.write( "#Circuits:" + str( len( listDir ) ) )
+                f.write( "DSfolderName: " + dsFolderName+ ",MIXEDTEST:" )
+                if MIXEDTEST:
+                    f.write( dsFolderName2 )
+                else:
+                    f.write( "False" )
+                f.write( ",#Circuits:" + str( len( listDir ) ) )
                 f.write( ",minEpochs:" + str( minEpochs ) )
                 f.write( ",maxEpochs:" + str( maxEpochs ) )
                 f.write( ",step:" + str( round( step, 5 ) ) )
@@ -1106,20 +1206,28 @@ if __name__ == '__main__':
             kendallTrain = []
 
             theDataset = DataSetFromYosys( listDir, ablationIter )#, mode='train' )
+            if DRAWCORRMATRIX:
+                theDataset.drawSingleCorrelationMatrix( dsFolderName+"-"+str( ablationIter ) )
+                # theDataset.drawCorrelationPerGraph( str( ablationIter ) )
+            if DRAWGRAPHDATA:
+                #theDataset.drawHeatCentrality( dsFolderName+"-"+str( ablationIter ) )
+                #theDataset.drawDataAnalysis( dsFolderName+"-"+str( ablationIter ) )
+                theDataset.drawDataAnalysisForEachGraph( dsFolderName+"-"+str( ablationIter ) )
+            if not DOLEARN:
+                sys.exit()
+            #TODO HOW TO IMPLEMENT THIS ??
+            # if DOKFOLD:
             kf = KFold( n_splits = num_folds )
             for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
-############# MANUAL EXPERIMENTS #############
-            # if True:
+            # if not DOKFOLD: # MANUAL SPLIT
             #     fold = 0
-                # LASCAS comparison, same as HUAWEI
-                # train_indices = [i for i in range(len(theDataset)) if i !=2 and i !=4] # remove swerv and bp_be_top
-                # test_indices = [2]
+            #     # LASCAS comparison, same as HUAWEI
+            #     train_indices = [i for i in range(len(theDataset)) if i !=2 and i !=4] # remove swerv and bp_be_top
+            #     test_indices = [2]
 
                 # HUAWEI's ablation, only Black_parrot
                 # train_indices = [7] 
                 # test_indices = [i for i in range(len(theDataset)) if i != 7 and i != 4 ]  #remove bp_be_top and black_parrot
-##############################################
-
                 print(f"Fold {fold+1}/{num_folds}")
                 #train_indices, valid_indices = train_indices[:-len(test_indices)], train_indices[-len(test_indices):]
                         
@@ -1127,13 +1235,6 @@ if __name__ == '__main__':
                 print( "##################################################################################" )
                 print( "#################### New CrossValid iteration  ###################################" )
                 print( "##################################################################################" )
-                # if DRAWOUTPUTS:
-                #     complete_dataset = train_dataset
-                #     complete_dataset.appendGraph( val_dataset )
-                #     complete_dataset.appendGraph( test_dataset )
-                #     complete_dataset.drawCorrelationMatrices()
-                #     del complete_dataset
-
                 features = theDataset[0].ndata[ featName ]
                 if( features.dim() == 1 ):
                     features = features.unsqueeze(1)
@@ -1143,6 +1244,7 @@ if __name__ == '__main__':
                 model = GAT( in_size, 256, out_size, heads=[4,4,6] ).to( device )
                 # model = GAT( in_size, 128, out_size, heads=[4,4,6]).to( device )
                 # model = SAGE( in_feats = in_size, hid_feats = 125, out_feats  = out_size ).to( device )
+
                 print( "\n###################" )
                 print( "## MODEL DEFINED ##"   )
                 print( "###################\n", flush = True )
@@ -1210,14 +1312,58 @@ if __name__ == '__main__':
                     f.write( "," + str( train_r2.item() ) +",,"+ str( test_r2.item() ) )  #+"\n")
                     f.write( "," + str( train_f1.item() ) +",,"+ str( test_f1.item() )  +"\n")
 
-                del model
-                del train_dataloader
-                del test_dataloader
+                # del model
+                # del train_dataloader
+                # del test_dataloader
                 torch.cuda.empty_cache()
-                if FULLTRAIN:
+                if FULLTRAIN and DOKFOLD:
                     break
                     break
                 # K fold loop end here
+            if MIXEDTEST:
+                listDir2 = []	
+                dsPath2 = Path.cwd() / dsFolderName2    
+                for designPath in Path( dsPath2 ).iterdir():
+                        if designPath.is_dir() and "runs" not in str( designPath ):
+                                print("designPath:", designPath )
+                                listDir2.append( designPath )
+
+                ##################################################################################
+                ############################# Pre Processing #####################################
+                ##################################################################################
+                writeDFrameData( listDir2, 'gatesToHeat.csv', "DSinfoBeforePreProcess.csv" )
+                df = aggregateData( listDir2, 'gatesToHeat.csv' )
+                print( "\n\n#######################\n## BEFORE PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
+                for col in df:
+                    print( "describe:\n", df[ col ].describe() )
+                df.to_csv( "aggregatedDFBefore.csv" )
+                df = df.drop( df.index[ df[ labelName ] < 0 ] )
+                df.hist( bins = 50, figsize = (15,12) )
+                plt.savefig( "BeforePreProcess-train+valid+test" )
+                plt.close( 'all' )
+                plt.clf()
+
+                preProcessData( listDir2 )
+
+                writeDFrameData( listDir2, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
+                df = aggregateData( listDir2, 'preProcessedGatesToHeat.csv' )
+                print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
+                for col in df:
+                        print( "\n####describe:\n", df[ col ].describe() )
+                df.to_csv( "aggregatedDFAfter.csv" )
+                df = df.drop( df.index[ df[ labelName ] < 0 ])
+                df = df.drop( df.index[ df[ rawFeatName ] < 0 ] )
+                df.hist( bins = 50, figsize = (15,12) )
+                plt.savefig( "AfterPreProcess-train+valid+test" )
+                plt.close( 'all' )
+                plt.clf()
+                theDataset2 = DataSetFromYosys( listDir2, ablationIter )#, mode='train' )
+                test_indices2 = [i for i in range(len(theDataset)) ]# if i !=2 and i !=4] # remove swerv and bp_be_top
+                # test_indices2 = [2]
+                test_dataloader2  = GraphDataLoader( torch.utils.data.dataset.Subset( theDataset2, test_indices2  ), batch_size = 1 )
+                test_kendall2, test_r2, test_f1    = evaluate_in_batches( test_dataloader2,  device, model )
+                print( "super new", test_kendall2 )
+            
             with open( summary, 'a' ) as f:
                 f.write( ",,,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +",,"+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
                 f.write( ",,,,,,,,Median,"  + str( statistics.median( kendallTrain ) ) +",,"+ str( statistics.median( kendallTest ) ) +"\n" )
@@ -1234,6 +1380,7 @@ if __name__ == '__main__':
             
         with open( ablationResult, 'a' ) as f:
             f.write("\n")
+    
     endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 2 )
     with open( summary, 'a' ) as f:
         f.write( ",,,featCombinations:"+ str( len( ablationList ) )+"," + str( endTimeAll ) + " hours" ) 
@@ -1249,7 +1396,7 @@ if __name__ == '__main__':
         new_counter = 0
     folder_name = str(new_counter)
     os.mkdir(folder_name)
-    excluded_folders = ["dataSet", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset", "asap7" ]
+    excluded_folders = ["nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset", "asap7" ]
     
     for item in os.listdir():
         print( "item:", item )
