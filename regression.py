@@ -14,6 +14,7 @@ import seaborn as sns
 from pathlib import Path #Reading CSV files
 from random import shuffle #shuffle train/valid/test
 from itertools import combinations # ablation to test multiple features
+from scipy import stats
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
@@ -346,7 +347,37 @@ class DataSetFromYosys( DGLDataset ):
                 ax.clear()
             plt.clf()
 
-    def drawDataAnalysis( self, fileName ):
+    # def drawDataAnalysis( self, fileName ):
+    #     print("************* INDSIDE DRAW DATA ANALYSIS *****************", flush=True)
+    #     agg_features = [graph.ndata[featName] for graph in self.graphs]
+    #     agg_labels = [graph.ndata[labelName] for graph in self.graphs]
+    #     num_features = agg_features[0].shape[1]
+    #     num_labels = 1  # Assuming there's only one label column
+    #     num_rows = math.ceil((num_features + num_labels) / 2)
+    #     plt.figure(figsize=(12, 6))
+    #     for i in range( num_features ):
+    #         plt.subplot(num_rows, 2, i + 1)
+    #         # sns.histplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), kde=True, bins=20)
+    #         # sns.boxplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy())
+    #         stats.probplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), plot=plt)
+    #         #sns.violinplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), inner="quartile")
+    #         plt.xlabel(self.namesOfFeatures[i])
+    #         plt.ylabel('Count')
+    #         plt.title(f'Aggregated Data Distribution for '+self.namesOfFeatures[i])
+    #     plt.subplot(num_rows, 2, num_rows * 2)  # Label in a separate subplot
+    #     # sns.histplot(torch.cat(agg_labels).cpu().numpy(), kde=True)
+    #     stats.probplot(torch.cat(agg_labels).cpu().numpy(), plot=plt)
+    #     plt.xlabel('Labels')
+    #     plt.ylabel('Count')
+    #     plt.title('Aggregated Data Distribution for Labels')
+    #     plt.suptitle('Aggregated Data Distribution for All Graphs')
+    #     plt.tight_layout()
+    #     plt.savefig("aggregatedDataAnalysis-" + fileName + ".png")
+    #     plt.close('all')
+    #     plt.clf()
+
+
+    def drawDataAnalysis(self, fileName):
         print("************* INDSIDE DRAW DATA ANALYSIS *****************", flush=True)
         agg_features = [graph.ndata[featName] for graph in self.graphs]
         agg_labels = [graph.ndata[labelName] for graph in self.graphs]
@@ -354,24 +385,27 @@ class DataSetFromYosys( DGLDataset ):
         num_labels = 1  # Assuming there's only one label column
         num_rows = math.ceil((num_features + num_labels) / 2)
         plt.figure(figsize=(12, 6))
-        for i in range( num_features ):
+        for i in range(num_features):
             plt.subplot(num_rows, 2, i + 1)
-            sns.histplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), kde=True, bins=20)
-            #sns.boxplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy())
-            plt.xlabel(self.namesOfFeatures[i])
-            plt.ylabel('Count')
-            plt.title(f'Aggregated Data Distribution for '+self.namesOfFeatures[i])
+            # Create a Q-Q plot for the current feature
+            data = torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy()
+            stats.probplot(data, dist='norm', plot=plt)
+            plt.xlabel('Theoretical Quantiles')
+            plt.ylabel('Ordered Values')
+            plt.title(f'Q-Q Plot for ' + self.namesOfFeatures[i])
         plt.subplot(num_rows, 2, num_rows * 2)  # Label in a separate subplot
-        sns.histplot(torch.cat(agg_labels).cpu().numpy(), kde=True)
-        plt.xlabel('Labels')
-        plt.ylabel('Count')
-        plt.title('Aggregated Data Distribution for Labels')
-        plt.suptitle('Aggregated Data Distribution for All Graphs')
+        # Create a Q-Q plot for the labels
+        label_data = torch.cat(agg_labels).cpu().numpy()
+        stats.probplot(label_data, dist='norm', plot=plt)
+        plt.xlabel('Theoretical Quantiles')
+        plt.ylabel('Ordered Values')
+        plt.title('Q-Q Plot for Labels')
+        plt.suptitle('Q-Q Plots for Aggregated Data')
         plt.tight_layout()
-        plt.savefig("aggregatedDataAnalysis-" + fileName + ".png")
+        plt.savefig("qqPlot-" + fileName + ".png")
         plt.close('all')
         plt.clf()
-
+        
     def drawDataAnalysisForEachGraph(self, filePrefix):
         print("************* INSIDE DRAW DATA ANALYSIS FOR EACH GRAPH *****************", flush=True)
         for i, graph in enumerate(self.graphs):
@@ -1211,8 +1245,8 @@ if __name__ == '__main__':
                 # theDataset.drawCorrelationPerGraph( str( ablationIter ) )
             if DRAWGRAPHDATA:
                 #theDataset.drawHeatCentrality( dsFolderName+"-"+str( ablationIter ) )
-                #theDataset.drawDataAnalysis( dsFolderName+"-"+str( ablationIter ) )
-                theDataset.drawDataAnalysisForEachGraph( dsFolderName+"-"+str( ablationIter ) )
+                theDataset.drawDataAnalysis( dsFolderName+"-"+str( ablationIter ) )
+                #theDataset.drawDataAnalysisForEachGraph( dsFolderName+"-"+str( ablationIter ) )
             if not DOLEARN:
                 sys.exit()
             #TODO HOW TO IMPLEMENT THIS ??
