@@ -59,8 +59,8 @@ dsFolderName = 'nangate-STDfeatures-missing-bpQuad-memPool'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
-maxEpochs = 250
-minEpochs = 150
+maxEpochs = 2
+minEpochs = 1
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
@@ -68,7 +68,7 @@ patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
 DOLEARN         = True
-DRAWOUTPUTS     = False
+DRAWOUTPUTS     = True
 DRAWCORRMATRIX  = False
 DRAWGRAPHDATA   = True
 
@@ -1528,5 +1528,6 @@ if __name__ == '__main__':
         print( "item:", item )
         if not re.match( pattern, item ) and item not in excluded_folders:
             shutil.move( item, os.path.join( folder_name, item ) )
+    shutil.copy("regression.py", os.path.join(folder_name, "regression.py"))
     with open( 'log.log', 'w' ) as f:
         f.write('')
