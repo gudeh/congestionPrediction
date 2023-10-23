@@ -47,15 +47,15 @@ mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
 num_folds        = 2
-MANUALABLATION   = True
+MANUALABLATION   = False
 feat2d = 'feat' 
-stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
+stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank' ]  #, 'closeness', 'between' ] # logicDepth
+fullAblationCombs = [ 'between' ] #,   'closeness'
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'nangate-STDfeatures-missing-bpQuad-memPool'
+dsFolderName = 'c17'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
@@ -67,7 +67,7 @@ improvement_threshold = 0.000001
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = True
+DOLEARN         = False
 DRAWOUTPUTS     = True
 DRAWCORRMATRIX  = False
 DRAWGRAPHDATA   = True
@@ -119,14 +119,14 @@ def dynamicConcatenate( featTensor, tensor2 ):
 
 def process_and_write_csvs(paths):
     categorical_columns=["type"]
-    columns_to_normalize = [ labelName, 'area', 'input_pins', 'output_pins'  ] #+ stdCellFeats
+    columns_to_normalize = [ labelName ] #, 'area', 'input_pins', 'output_pins'  ] #+ stdCellFeats
 
     # Step 1: Initialize an empty dataframe to store all data
     master_df = pd.DataFrame()
 
     # Step 3: Read and concatenate all CSVs into the master dataframe
     for path in paths:
-        csv_path = os.path.join(path, "gatesToHeatSTDfeatures.csv")
+        csv_path = os.path.join(path, "gatesToHeat.csv")
         if os.path.isfile(csv_path):
             df = pd.read_csv( csv_path, index_col = 'id', dtype = { 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'int64', 'output_pins':'int64', 'logic_function':'string' } )
             master_df = pd.concat([master_df, df], ignore_index=True)
@@ -145,7 +145,7 @@ def process_and_write_csvs(paths):
 
     # Step 5: Normalize the values in specified columns across all CSVs
     for path in paths:
-        csv_path = os.path.join( path, "gatesToHeatSTDfeatures.csv" )
+        csv_path = os.path.join( path, "gatesToHeat.csv" )
         if os.path.isfile( csv_path ):
             df = pd.read_csv( csv_path, index_col = 'id', dtype = { 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'int64', 'output_pins':'int64', 'logic_function':'string' } )
             for column, categories in categorical_mapping.items():
@@ -172,8 +172,8 @@ def preProcessData( listDir ):
     regexp = re.compile( r'(^.*)\_?[x|xp](\d?\d)', re.IGNORECASE ) 
     for path in listDir:
         #print( "Circuit:",path )
-        # gateToHeat = pd.read_csv( path / 'gatesToHeatSTDfeatures.csv', index_col = 'id', dtype = { 'type':'category' } )
-        gateToHeat = pd.read_csv( path / 'gatesToHeatSTDfeatures.csv', index_col = 'id', dtype = { 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'int64', 'output_pins':'int64', 'logic_function':'string' } )                    
+        # gateToHeat = pd.read_csv( path / 'gatesToHeat.csv', index_col = 'id', dtype = { 'type':'category' } )
+        gateToHeat = pd.read_csv( path / 'gatesToHeat.csv', index_col = 'id', dtype = { 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'int64', 'output_pins':'int64', 'logic_function':'string' } )                    
         labelsAux = pd.concat( [ labelsAux, gateToHeat[ labelName ] ], names = [ labelName ] )
         graphs[ path ] = gateToHeat#.append( gateToHeat )
         # for cellType in gateToHeat[ rawFeatName ]:
@@ -510,7 +510,17 @@ class DataSetFromYosys( DGLDataset ):
         for path in self.graphPaths:
 	        graph = self._process_single( path )
 	        self.graphs.append( graph )
-
+                
+    def centralityToCsv( self, designPath, centralityName ):
+        node_data_attributes = self.graph.ndata.keys()
+        combined_df = pd.DataFrame()
+        for attribute_name in node_data_attributes:
+            node_data = self.graph.ndata[ attribute_name ]
+            df = pd.DataFrame( node_data.numpy() ) 
+            df.columns = [ f"{attribute_name}_{i}-{centralityName}" for i in range( df.shape[1] ) ]
+            combined_df = pd.concat([combined_df, df], axis=1)
+        combined_df.to_csv(f'{designPath}/{self.graph.name}-{centralityName}.csv', index=True)
+                
     def _process_single( self, designPath ):
         print( "\n\n########## PROCESS SINGLE #################" )
         print( "      Circuit:", str( designPath ).rsplit( '/' )[-1] )
@@ -534,18 +544,14 @@ class DataSetFromYosys( DGLDataset ):
         for column in self.ablationFeatures:
             if column not in nodes_data:
                 nodes_data[ column ] = 0
-        #nodes_data.update(pd.DataFrame({column: 0 for column in self.ablationFeatures if column not in nodes_data}, index=[0]))
-        # df = nodes_data[ [ rawFeatName ] + [ labelName ] ]
-        df = nodes_data[ stdCellFeats + [ labelName ] ]
+        df = nodes_data[stdCellFeats + [labelName]].copy()  # Create a copy of the DataFrame
+        df['id'] = nodes_data.index.values
         
         print("df.columns:",df.columns)
-        # df_wanted = (df[rawFeatName] >= 0) & (df[labelName] > 0) if rawFeatName in self.res else (df[labelName] > 0)
         df_wanted = ( df[ "type" ] >= 0 ) & ( df[ labelName] > 0 ) if 'type' in self.ablationFeatures else ( df[ labelName ] > 0 )
         df_wanted = ~df_wanted
         
-    #		print( "df_wanted:", df_wanted.shape, "\n", df_wanted )
         removedNodesMask = torch.tensor( df_wanted )
-    #		print( "removedNodesMask:", removedNodesMask.shape )#, "\n", removedNodesMask )
         print( "nodes_data:", type( nodes_data ), nodes_data.shape ) #, "\n", nodes_data )
         idsToRemove = torch.tensor( nodes_data.index )[ removedNodesMask ]
         print( "idsToRemove:", idsToRemove.shape ) #,"\n", torch.sort( idsToRemove ) )
@@ -554,22 +560,17 @@ class DataSetFromYosys( DGLDataset ):
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
         self.graph.name = str( designPath ).rsplit( '/' )[-1]
 
-        # if rawFeatName in self.ablationFeatures:
-            # self.graph.ndata[ feat2d ] =  torch.tensor( nodes_data[ rawFeatName ].values )
-            # if rawFeatName not in self.namesOfFeatures:
-            #     self.namesOfFeatures.append( rawFeatName )
         for featStr in stdCellFeats:
-            #self.graph.ndata[ feat2d ] =  torch.tensor( nodes_data[ featStr ].values )
             if featStr in self.ablationFeatures:
                 self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, torch.tensor( nodes_data[ featStr ].values ) )
                 if featStr not in self.namesOfFeatures:
                     self.namesOfFeatures.append( featStr )
-        self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
+        self.graph.ndata[ labelName  ] = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
+        self.graph.ndata[ "id" ]       = torch.tensor( nodes_data.index.values )
     ################### REMOVE NODES #############################################
         print( "---> BEFORE REMOVED NODES:")
         print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
-        #print( "\tself.graph.ndata\n", self.graph.ndata )
         isolated_nodes_before = ( ( self.graph.in_degrees() == 0 ) & ( self.graph.out_degrees() == 0 ) ).nonzero().squeeze(1)
         print( "isolated nodes before any node removal:", isolated_nodes_before.shape )
         self.graph.remove_nodes( idsToRemove )
@@ -595,8 +596,48 @@ class DataSetFromYosys( DGLDataset ):
             normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in close_scores_list ] 
             close_tensor = torch.tensor( normalized_scores )
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, close_tensor )
-            if 'Closeness' not in self.namesOfFeatures:
-                self.namesOfFeatures.append( 'Closeness' )
+            if 'closeness' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'closeness' )
+            self.centralityToCsv( designPath, 'closeness' )
+    ################### GROUP BETWEENNESS  ################################################
+        #drawGraph( self.graph, self.graph.name )
+        if 'between' in self.ablationFeatures:
+            print( "calculating group betweenness!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            # print( ".nodes:\n", nx_graph.nodes(data=True))
+            # print( ".edges:\n", nx_graph.edges(data=True))
+
+            # group_betweenness = {}
+            # group_distance = 3
+            # for node in nx_graph.nodes():
+            #     print( "node", node, flush = True )
+            #     subgraph = nx.ego_graph( nx_graph, node, radius = group_distance )
+            #     # group_betweenness[node] = nx.group_betweenness_centrality( nx_graph, subgraph )
+            #     if nx.is_connected( subgraph ) and len( subgraph ) > 2:
+            #         group_betweenness[node] = nx.group_betweenness_centrality(nx_graph, subgraph)
+            #     else:
+            #         group_betweenness[node] = {}
+
+            # for node, centrality in group_betweenness.items():
+            #     print(f"Node {node}:")
+            #     if isinstance(centrality, float):
+            #         print(f"  Group: {centrality}")
+            #     else:
+            #         for group, centrality_score in centrality.items():
+            #             print(f"  Group {group}: {centrality_score}")
+            # group_betweenness_list = list( group_betweenness.values() )
+            between_scores = nx.betweenness_centrality( nx_graph )
+            betweenness_list = list( between_scores.values() )
+            min_score = min( betweenness_list )
+            max_score = max( betweenness_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in betweenness_list ] 
+            between_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, between_tensor )
+            if 'betweenness' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'betweenness' )
+            self.centralityToCsv( designPath, 'betweenness' )
     ################### EIGENVECTOR  ################################################
         if 'eigen' in self.ablationFeatures:
             print( "calculating eigenvector!" )
@@ -611,42 +652,6 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, eigen_tensor )
             if 'Eigen' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'Eigen' )
-    ################### GROUP BETWEENNESS  ################################################
-        #drawGraph( self.graph, self.graph.name )
-        if 'between' in self.ablationFeatures:
-            print( "calculating group betweenness!" )
-            aux_graph = self.graph.to_networkx()
-            nx_graph  = nx.Graph( aux_graph )
-            print( "nx_graph:\n", nx_graph, flush = True )
-            # print( ".nodes:\n", nx_graph.nodes(data=True))
-            # print( ".edges:\n", nx_graph.edges(data=True))
-
-            group_betweenness = {}
-            group_distance = 3
-            for node in nx_graph.nodes():
-                print( "node", node, flush = True )
-                subgraph = nx.ego_graph( nx_graph, node, radius = group_distance )
-                # group_betweenness[node] = nx.group_betweenness_centrality( nx_graph, subgraph )
-                if nx.is_connected( subgraph ) and len( subgraph ) > 2:
-                    group_betweenness[node] = nx.group_betweenness_centrality(nx_graph, subgraph)
-                else:
-                    group_betweenness[node] = {}
-
-            for node, centrality in group_betweenness.items():
-                print(f"Node {node}:")
-                if isinstance(centrality, float):
-                    print(f"  Group: {centrality}")
-                else:
-                    for group, centrality_score in centrality.items():
-                        print(f"  Group {group}: {centrality_score}")
-            group_betweenness_list = list( group_betweenness.values() )
-            min_score = min( group_betweenness_list )
-            max_score = max( group_betweenness_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in group_betweenness_list ] 
-            between_tensor = torch.tensor( normalized_scores )
-            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, between_tensor )
-            if 'Betweenness' not in self.namesOfFeatures:
-                self.namesOfFeatures.append( 'Betweenness' )
     ################### PAGE RANK ################################################    
         if 'pageRank' in self.ablationFeatures:
             nx_graph = self.graph.to_networkx()
@@ -1208,8 +1213,8 @@ if __name__ == '__main__':
     ##################################################################################
     ############################# Pre Processing #####################################
     ##################################################################################
-    writeDFrameData( listDir, 'gatesToHeatSTDfeatures.csv', "DSinfoBeforePreProcess.csv" )
-    df = aggregateData( listDir, 'gatesToHeatSTDfeatures.csv' )
+    writeDFrameData( listDir, 'gatesToHeat.csv', "DSinfoBeforePreProcess.csv" )
+    df = aggregateData( listDir, 'gatesToHeat.csv' )
     print( "\n\n#######################\n## BEFORE PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
     for col in df:
         print( "describe:\n", df[ col ].describe() )
@@ -1454,8 +1459,8 @@ if __name__ == '__main__':
                 ##################################################################################
                 ############################# Pre Processing #####################################
                 ##################################################################################
-                writeDFrameData( listDir2, 'gatesToHeatSTDfeatures.csv', "DSinfoBeforePreProcess.csv" )
-                df = aggregateData( listDir2, 'gatesToHeatSTDfeatures.csv' )
+                writeDFrameData( listDir2, 'gatesToHeat.csv', "DSinfoBeforePreProcess.csv" )
+                df = aggregateData( listDir2, 'gatesToHeat.csv' )
                 print( "\n\n#######################\n## BEFORE PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
                 for col in df:
                     print( "describe:\n", df[ col ].describe() )
