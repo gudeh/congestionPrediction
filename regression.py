@@ -43,15 +43,15 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-mainMaxIter      = 5
+mainMaxIter      = 1
 FULLTRAIN        = True
 DOKFOLD          = False
 num_folds        = 2
-MANUALABLATION   = True
+MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank' ]  #, 'closeness', 'between' ] # logicDepth
+fullAblationCombs = [ 'input_pins', 'type',  'output_pins', 'eigen', 'pageRank' ]  #, 'closeness', 'between' ] # logicDepth
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
@@ -67,8 +67,8 @@ improvement_threshold = 0.000001
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = True
-DRAWOUTPUTS     = True
+DOLEARN         = False
+DRAWOUTPUTS     = False
 DRAWCORRMATRIX  = False
 DRAWGRAPHDATA   = True
 
@@ -352,13 +352,18 @@ class DataSetFromYosys( DGLDataset ):
             print("g.ndata[feat2d]:", type(g.ndata[feat2d]), g.ndata[feat2d].shape, flush=True)
             positions = g.ndata["position"].to(torch.float32).to("cpu")
             feat_values = g.ndata[feat2d]
-            num_columns = feat_values.shape[1]  # Get the number of columns in the 2D tensor
+            num_columns = 1 if len( feat_values.shape ) == 1  else feat_values.shape[1]  # Get the number of columns in the 2D tensor
             if num_columns != len(self.namesOfFeatures):
                 print("ERROR: namesOfFeatures and num_columns with different sizes in drawHeatCentrality!!")
-            fig, axes = plt.subplots(1, num_columns, figsize=(6 * num_columns, 6))
+            # fig, axes = plt.subplots(1, num_columns, figsize=(6 * num_columns, 6))
+            if num_columns == 1:
+                fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+                axes = [ax]  # Create a list with a single Axes object
+            else:
+                fig, axes = plt.subplots(1, num_columns, figsize=(6 * num_columns, 6))
             for i, ax in enumerate(axes):
                 dummy_image = ax.imshow([[0, 1]], cmap='coolwarm')
-                feat_values_i = feat_values[:, i]
+                feat_values_i = feat_values if len(feat_values.shape) == 1 else feat_values[:, i]
                 clip_min = feat_values_i.min()
                 clip_max = feat_values_i.max()
                 feat_values_i = np.clip(feat_values_i, clip_min, clip_max)
@@ -390,10 +395,13 @@ class DataSetFromYosys( DGLDataset ):
 
         print( "self.namesOfFeatures:", self.namesOfFeatures )
         print( "agg_features[0].shape:", agg_features[0].shape )
-        print( "agg_features:", type( agg_features ), "\n", agg_features )
+        print( "agg_features:", type( agg_features ), len( agg_features ), "\n", agg_features )
         min_max_data = []
         for i, feature_name in enumerate(self.namesOfFeatures):
-            feature_values = torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy()
+            agg_features_2d = [feat if len(feat.shape) == 1 else feat[:, i] for feat in agg_features]
+            feature_values = torch.cat(agg_features_2d, dim=0).cpu().numpy()
+            print( "agg_features_2d:", len( agg_features_2d ) )
+            print( "feature_values:", feature_values.shape )
             min_value = min(feature_values)
             max_value = max(feature_values)
             min_max_data.append((f'Min_{feature_name}', min_value))
@@ -414,7 +422,8 @@ class DataSetFromYosys( DGLDataset ):
             csv_writer.writerow(('Total_Num_Nodes', total_num_nodes))
             csv_writer.writerow(('Total_Num_Edges', total_num_edges))
 
-        num_features = agg_features[0].shape[1]
+        
+        num_features = 1 if len( agg_features[0].shape ) == 1 else agg_features[0].shape[1]
         num_labels = 1  # Assuming there's only one label column
         num_plots = num_features + num_labels
 
@@ -424,7 +433,10 @@ class DataSetFromYosys( DGLDataset ):
         plt.figure(figsize=(12, 6))
         for i in range(num_features):
             plt.subplot(num_rows, num_cols, i + 1)
-            sns.histplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), kde=True, bins=20)
+            # sns.histplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), kde=True, bins=20)
+            agg_features_2d = [feat if len(feat.shape) == 1 else feat[:, i] for feat in agg_features]
+            feature_values = torch.cat(agg_features_2d, dim=0).cpu().numpy()
+            sns.histplot(feature_values, kde=True, bins=20)
             plt.xlabel(self.namesOfFeatures[i])
             plt.ylabel('Count')
             plt.title(self.namesOfFeatures[i])
@@ -478,7 +490,8 @@ class DataSetFromYosys( DGLDataset ):
             print("graph.name:", graph.name)
             agg_features = graph.ndata[feat2d]
             agg_labels = graph.ndata[labelName]
-            num_features = agg_features.shape[1]
+            # num_features = agg_features.shape[1]
+            num_features = 1 if len( agg_features.shape ) == 1 else agg_features.shape[1]
             num_labels = 1  # Assuming there's only one label column
             total_plots = num_features + num_labels
             num_cols = 2  # Number of columns for the subplot grid
@@ -489,7 +502,9 @@ class DataSetFromYosys( DGLDataset ):
             for j in range(total_plots):
                 plt.subplot(num_rows, num_cols, j + 1)
                 if j < num_features:
-                    sns.histplot(agg_features[:, j].cpu().numpy(), kde=True, bins=20)
+                    # sns.histplot(agg_features[:, j].cpu().numpy(), kde=True, bins=20)
+                    sns.histplot( agg_features.cpu().numpy() if len(agg_features.shape) == 1 else agg_features[:, j].cpu().numpy(), kde=True, bins=20)
+                    # [feat if len(feat.shape) == 1 else feat[:, i] for feat in agg_features]
                     plt.xlabel(self.namesOfFeatures[j])
                     plt.ylabel('Count')
                     plt.title(f'{self.namesOfFeatures[j]} ({graph.name})')
@@ -1300,12 +1315,21 @@ if __name__ == '__main__':
                 f.write( ",patience:" + str( patience ) )
                 f.write( "\ntrainIndices,testIndices,finalEpoch,runtime(min),MaxMemory,AverageMemory, Circuit Test, TrainKendall, TestKendall, TrainPearson, TestPearson, TrainSpearman, TestSpearman\n" )
             with open( ablationResult, 'a' ) as f:
-                # copied_list = [s[:1].capitalize() for s in ablationIter]
-                copied_list = [s for s in ablationIter]
-                if len( copied_list ) > 1:
-                    f.write( "; ".join( copied_list ) )
-                else:
-                    f.write( str( copied_list ) )
+                abbreviations = {
+                    'inDegree': 'ID',
+                    'outDegree': 'OD',
+                    'input_pins': 'IP',
+                    'output_pins': 'OP'
+                }
+                copied_list = [abbreviations.get(s, s[:1].capitalize()) for s in ablationIter]
+                print("copied_list for ablationResult:", copied_list)
+
+                # # copied_list = [s[:1].capitalize() for s in ablationIter]
+                # copied_list = [s for s in ablationIter]
+                # if len( copied_list ) > 1:
+                #     f.write( "; ".join( copied_list ) )
+                # else:
+                #     f.write( str( copied_list ) )
             print( "%%%%%%%%%%%%%%%%%%%%%%%%%%\nablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, "\n%%%%%%%%%%%%%%%%%%%%%%%%%%%", flush = True )
             ablationIter = list( ablationIter )
             if os.path.exists( imageOutput ):
@@ -1330,8 +1354,8 @@ if __name__ == '__main__':
             if DRAWCORRMATRIX:
                 theDataset.drawSingleCorrelationMatrix( dsFolderName+"-"+str( ablationIter ) )
                 # theDataset.drawCorrelationPerGraph( dsFolderName+"-"+str( ablationIter ) )
-            if DRAWGRAPHDATA and not FULLTRAIN:
-                #theDataset.drawHeatCentrality( dsFolderName+"-"+str( ablationIter ) )
+            if DRAWGRAPHDATA:# and not FULLTRAIN:
+                theDataset.drawHeatCentrality( dsFolderName+"-"+str( ablationIter ) )
                 theDataset.drawDataAnalysis( dsFolderName+"-"+str( ablationIter ) )
                 theDataset.drawDataAnalysisForEachGraph( dsFolderName+"-"+str( ablationIter ) )
             if not DOLEARN:
