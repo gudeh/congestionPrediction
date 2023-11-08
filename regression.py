@@ -43,6 +43,7 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
+validFeatures = [ 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
 mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
@@ -52,6 +53,8 @@ feat2d = 'feat'
 stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
 fullAblationCombs = [ 'load' ] #,   'closeness'
+
+            
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
@@ -568,7 +571,7 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.ndata[ labelName  ] = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
         self.graph.ndata[ "id" ]       = torch.tensor( nodes_data.index.values )
-    ################### REMOVE NODES #############################################
+################### REMOVE NODES #############################################
         print( "---> BEFORE REMOVED NODES:")
         print( "\tself.graph.nodes()", self.graph.nodes().shape )#, "\n", self.graph.nodes() )
         isolated_nodes_before = ( ( self.graph.in_degrees() == 0 ) & ( self.graph.out_degrees() == 0 ) ).nonzero().squeeze(1)
@@ -579,36 +582,29 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.remove_nodes( isolated_nodes )
         print( "\n---> AFTER REMOVED NODES:" )
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
-################### LOAD  ################################################
-        if 'load' in self.ablationFeatures:
-            print( "calculating load!" )
+################### CURRENT FLOW CLOSENESS ######################################
+        if any( "CFcloseness" == s for s in self.ablationFeatures ):
+            print( "calculating CFcloseness!" )
             aux_graph = self.graph.to_networkx()
             nx_graph  = nx.Graph( aux_graph )
             print( "nx_graph:\n", nx_graph, flush = True )
-            # print( ".nodes:\n", nx_graph.nodes(data=True))
-            # print( ".edges:\n", nx_graph.edges(data=True))
-            close_scores = nx.load_centrality( nx_graph )
-            # close_scores = nx.incremental_load_centrality( nx_graph )
-            close_scores_list = list( close_scores.values() )
-            min_score = min( close_scores_list )
-            max_score = max( close_scores_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in close_scores_list ] 
-            close_tensor = torch.tensor( normalized_scores )
-            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, close_tensor )
-            if 'load' not in self.namesOfFeatures:
-                self.namesOfFeatures.append( 'load' )
-            self.centralityToCsv( designPath, 'load' )        
+            CFcloseness_scores = nx.current_flow_closeness_centrality( nx_graph )
+            CFcloseness_scores_list = list( CFcloseness_scores.values() )
+            min_score = min( CFcloseness_scores_list )
+            max_score = max( CFcloseness_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in CFcloseness_scores_list ] 
+            CFcloseness_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, CFcloseness_tensor )
+            if 'CFcloseness' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'CFcloseness' )
+            self.centralityToCsv( designPath, 'CFcloseness' )
 ################### CLOSENESS  ################################################
-        #drawGraph( self.graph, self.graph.name )
-        if 'closeness' in self.ablationFeatures:
+        if any( "closeness" == s for s in self.ablationFeatures ):
             print( "calculating closeness!" )
             aux_graph = self.graph.to_networkx()
             nx_graph  = nx.Graph( aux_graph )
             print( "nx_graph:\n", nx_graph, flush = True )
-            # print( ".nodes:\n", nx_graph.nodes(data=True))
-            # print( ".edges:\n", nx_graph.edges(data=True))
             close_scores = nx.closeness_centrality( nx_graph )
-            # close_scores = nx.incremental_closeness_centrality( nx_graph )
             close_scores_list = list( close_scores.values() )
             min_score = min( close_scores_list )
             max_score = max( close_scores_list )
@@ -618,35 +614,29 @@ class DataSetFromYosys( DGLDataset ):
             if 'closeness' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'closeness' )
             self.centralityToCsv( designPath, 'closeness' )
-    ################### GROUP BETWEENNESS  ################################################
-        #drawGraph( self.graph, self.graph.name )
-        if 'between' in self.ablationFeatures:
+################### CURRENT FLOW BETWEENNESS  ################################################
+        if any( "CFbetween" == s for s in self.ablationFeatures ):
+            print( "calculating CFbetween!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            CFbetween_scores = nx.current_flow_betweenness_centrality( nx_graph )
+            CFbetween_scores_list = list( CFbetween_scores.values() )
+            min_score = min( CFbetween_scores_list )
+            max_score = max( CFbetween_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in CFbetween_scores_list ] 
+            CFbetween_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, CFbetween_tensor )
+            if 'CFbetween' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'CFbetween' )
+            self.centralityToCsv( designPath, 'CFbetween' )
+################### BETWEENNESS  ################################################
+        # if 'between' in self.ablationFeatures:
+        if any( "between" == s for s in self.ablationFeatures ):
             print( "calculating group betweenness!" )
             aux_graph = self.graph.to_networkx()
             nx_graph  = nx.Graph( aux_graph )
             print( "nx_graph:\n", nx_graph, flush = True )
-            # print( ".nodes:\n", nx_graph.nodes(data=True))
-            # print( ".edges:\n", nx_graph.edges(data=True))
-
-            # group_betweenness = {}
-            # group_distance = 3
-            # for node in nx_graph.nodes():
-            #     print( "node", node, flush = True )
-            #     subgraph = nx.ego_graph( nx_graph, node, radius = group_distance )
-            #     # group_betweenness[node] = nx.group_betweenness_centrality( nx_graph, subgraph )
-            #     if nx.is_connected( subgraph ) and len( subgraph ) > 2:
-            #         group_betweenness[node] = nx.group_betweenness_centrality(nx_graph, subgraph)
-            #     else:
-            #         group_betweenness[node] = {}
-
-            # for node, centrality in group_betweenness.items():
-            #     print(f"Node {node}:")
-            #     if isinstance(centrality, float):
-            #         print(f"  Group: {centrality}")
-            #     else:
-            #         for group, centrality_score in centrality.items():
-            #             print(f"  Group {group}: {centrality_score}")
-            # group_betweenness_list = list( group_betweenness.values() )
             between_scores = nx.betweenness_centrality( nx_graph )
             betweenness_list = list( between_scores.values() )
             min_score = min( betweenness_list )
@@ -657,7 +647,23 @@ class DataSetFromYosys( DGLDataset ):
             if 'betweenness' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'betweenness' )
             self.centralityToCsv( designPath, 'betweenness' )
-    ################### EIGENVECTOR  ################################################
+#################### LOAD  ################################################
+        if 'load' in self.ablationFeatures:
+            print( "calculating load!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            load_scores = nx.load_centrality( nx_graph )
+            load_scores_list = list( load_scores.values() )
+            min_score = min( load_scores_list )
+            max_score = max( load_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in load_scores_list ] 
+            load_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, load_tensor )
+            if 'load' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'load' )
+            self.centralityToCsv( designPath, 'load' )                        
+################### EIGENVECTOR  ################################################
         if 'eigen' in self.ablationFeatures:
             print( "calculating eigenvector!" )
             aux_graph = self.graph.to_networkx()
@@ -671,7 +677,7 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, eigen_tensor )
             if 'Eigen' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'Eigen' )
-    ################### PAGE RANK ################################################    
+################### PAGE RANK ################################################    
         if 'pageRank' in self.ablationFeatures:
             nx_graph = self.graph.to_networkx()
             pagerank_scores = nx.pagerank(nx_graph)
@@ -683,7 +689,7 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, pagerank_tensor )
             if 'pageRank' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'pageRank' )
-    ################### IN DEGREE ################################################    
+################### IN DEGREE ################################################    
         if 'inDegree' in self.ablationFeatures:
             nx_graph = self.graph.to_networkx()
             inDegree_scores = nx.in_degree_centrality(nx_graph)
@@ -1295,6 +1301,12 @@ if __name__ == '__main__':
     else:
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
         ablationList = [ ( 'inDegree', 'outDegree', 'input_pins', 'output_pins' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
+    for item in ablationList:
+        for sub_item in item:
+            if sub_item not in validFeatures:
+                print(f"Error: '{sub_item}' is not in validFeatures.")
+                sys.exit()
+            
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
     for mainIteration in range( 0, mainMaxIter ):
