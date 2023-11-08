@@ -51,11 +51,11 @@ MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'between' ] #,   'closeness'
+fullAblationCombs = [ 'load' ] #,   'closeness'
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'c17'
+dsFolderName = 'nangateV1'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
@@ -579,7 +579,26 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.remove_nodes( isolated_nodes )
         print( "\n---> AFTER REMOVED NODES:" )
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
-    ################### CLOSENESS  ################################################
+################### LOAD  ################################################
+        if 'load' in self.ablationFeatures:
+            print( "calculating load!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            # print( ".nodes:\n", nx_graph.nodes(data=True))
+            # print( ".edges:\n", nx_graph.edges(data=True))
+            close_scores = nx.load_centrality( nx_graph )
+            # close_scores = nx.incremental_load_centrality( nx_graph )
+            close_scores_list = list( close_scores.values() )
+            min_score = min( close_scores_list )
+            max_score = max( close_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in close_scores_list ] 
+            close_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, close_tensor )
+            if 'load' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'load' )
+            self.centralityToCsv( designPath, 'load' )        
+################### CLOSENESS  ################################################
         #drawGraph( self.graph, self.graph.name )
         if 'closeness' in self.ablationFeatures:
             print( "calculating closeness!" )
@@ -1528,7 +1547,7 @@ if __name__ == '__main__':
         new_counter = 0
     folder_name = str(new_counter)
     os.mkdir(folder_name)
-    excluded_folders = ["nangate-STDfeatures-missing-bpQuad-memPool", "nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset", "asap7"]
+    excluded_folders = ["nangate-STDfeatures-missing-bpQuad-memPool", "nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset", "asap7", "nangateV1" ]
     for item in os.listdir():
         print( "item:", item )
         if not re.match( pattern, item ) and item not in excluded_folders:
