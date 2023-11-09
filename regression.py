@@ -43,7 +43,7 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-validFeatures = [ 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+validFeatures = [ 'subgraph', 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
 mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
@@ -52,7 +52,7 @@ MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'load' ] #,   'closeness'
+fullAblationCombs = [ 'subgraph' ] #,   'closeness'
 
             
 
@@ -582,6 +582,22 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.remove_nodes( isolated_nodes )
         print( "\n---> AFTER REMOVED NODES:" )
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
+################### CURRENT FLOW CLOSENESS ######################################
+        if any( "subgraph" == s for s in self.ablationFeatures ):
+            print( "calculating subgraph!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            subgraph_scores = nx.subgraph_centrality( nx_graph )
+            subgraph_scores_list = list( subgraph_scores.values() )
+            min_score = min( subgraph_scores_list )
+            max_score = max( subgraph_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in subgraph_scores_list ] 
+            subgraph_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, subgraph_tensor )
+            if 'subgraph' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'subgraph' )
+            self.centralityToCsv( designPath, 'subgraph' )        
 ################### CURRENT FLOW CLOSENESS ######################################
         if any( "CFcloseness" == s for s in self.ablationFeatures ):
             print( "calculating CFcloseness!" )
