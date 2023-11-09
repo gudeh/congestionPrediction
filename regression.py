@@ -43,7 +43,7 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-validFeatures = [ 'subgraph', 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+validFeatures = [ 'information', 'subgraph', 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
 mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
@@ -52,7 +52,7 @@ MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'subgraph' ] #,   'closeness'
+fullAblationCombs = [ 'CFbetween' ] #,   'closeness'
 
             
 
@@ -582,7 +582,11 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.remove_nodes( isolated_nodes )
         print( "\n---> AFTER REMOVED NODES:" )
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
-################### CURRENT FLOW CLOSENESS ######################################
+        # check_graph = self.graph.to_networkx().to_undirected()
+        # check_graph.remove_nodes_from( list(nx.isolates(check_graph)) )
+        # print("nx.is_connected(check_graph)", nx.is_connected(check_graph))
+        # del check_graph
+################### SUBGRAPH ######################################
         if any( "subgraph" == s for s in self.ablationFeatures ):
             print( "calculating subgraph!" )
             aux_graph = self.graph.to_networkx()
@@ -598,6 +602,23 @@ class DataSetFromYosys( DGLDataset ):
             if 'subgraph' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'subgraph' )
             self.centralityToCsv( designPath, 'subgraph' )        
+################### INFORMATION  ######################################
+        if any( "information" == s for s in self.ablationFeatures ):
+            print( "calculating information!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            # information_scores = nx.information_centrality( nx_graph )
+            information_scores = nx.approximate_current_flow_betweenness_centrality( nx_graph )
+            information_scores_list = list( information_scores.values() )
+            min_score = min( information_scores_list )
+            max_score = max( information_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in information_scores_list ] 
+            information_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, information_tensor )
+            if 'information' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'information' )
+            self.centralityToCsv( designPath, 'information' )            
 ################### CURRENT FLOW CLOSENESS ######################################
         if any( "CFcloseness" == s for s in self.ablationFeatures ):
             print( "calculating CFcloseness!" )
@@ -636,7 +657,15 @@ class DataSetFromYosys( DGLDataset ):
             aux_graph = self.graph.to_networkx()
             nx_graph  = nx.Graph( aux_graph )
             print( "nx_graph:\n", nx_graph, flush = True )
-            CFbetween_scores = nx.current_flow_betweenness_centrality( nx_graph )
+            CFbetween_scores = {} 
+            components = list(nx.connected_components( nx_graph ))
+            for component in components:
+                subgraph = nx_graph.subgraph(component)  # Create a subgraph for the connected component
+                current_flow_betweenness_subgraph = nx.current_flow_betweenness_centrality(subgraph)
+                for node, value in current_flow_betweenness_subgraph.items():
+                    CFbetween_scores[node] = value
+
+            # CFbetween_scores = nx.current_flow_betweenness_centrality( nx_graph )
             CFbetween_scores_list = list( CFbetween_scores.values() )
             min_score = min( CFbetween_scores_list )
             max_score = max( CFbetween_scores_list )
