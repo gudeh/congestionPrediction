@@ -43,7 +43,7 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-validFeatures = [ 'harmonic', 'information', 'subgraph', 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+validFeatures = [ 'percolation', 'harmonic', 'information', 'subgraph', 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
 mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
@@ -52,7 +52,7 @@ MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'harmonic' ] #,   'closeness'
+fullAblationCombs = [ 'percolation' ]
 
             
 
@@ -77,7 +77,7 @@ DRAWGRAPHDATA   = True
 
 
 DEBUG           = 0 #1 for evaluation inside train
-CUDA            = False
+CUDA            = True
 SKIPFINALEVAL   = False #TODO True
 SELF_LOOP = True
 COLAB     = False
@@ -587,6 +587,23 @@ class DataSetFromYosys( DGLDataset ):
         # check_graph.remove_nodes_from( list(nx.isolates(check_graph)) )
         # print("nx.is_connected(check_graph)", nx.is_connected(check_graph))
         # del check_graph
+################### PERCOLATION ######################################
+        if any( "percolation" == s for s in self.ablationFeatures ):
+            print( "calculating percolation!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            nx.set_node_attributes( nx_graph, 0.1, 'percolation')
+            print( "nx_graph:\n", nx_graph, flush = True )
+            percolation_scores = nx.percolation_centrality( nx_graph )
+            percolation_scores_list = list( percolation_scores.values() )
+            min_score = min( percolation_scores_list )
+            max_score = max( percolation_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in percolation_scores_list ] 
+            percolation_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, percolation_tensor )
+            if 'percolation' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'percolation' )
+            self.centralityToCsv( designPath, 'percolation' )
 ################### HARMONIC ######################################
         if any( "harmonic" == s for s in self.ablationFeatures ):
             print( "calculating harmonic!" )
