@@ -43,7 +43,7 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-validFeatures = [ 'information', 'subgraph', 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+validFeatures = [ 'harmonic', 'information', 'subgraph', 'load', 'between', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
 mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
@@ -52,7 +52,7 @@ MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'CFbetween' ] #,   'closeness'
+fullAblationCombs = [ 'harmonic' ] #,   'closeness'
 
             
 
@@ -77,15 +77,16 @@ DRAWGRAPHDATA   = True
 
 
 DEBUG           = 0 #1 for evaluation inside train
-CUDA            = True
+CUDA            = False
 SKIPFINALEVAL   = False #TODO True
 SELF_LOOP = True
 COLAB     = False
 
-print( "torch.cuda.is_available():", torch.cuda.is_available() )
-print( "torch.cuda.device_count():", torch.cuda.device_count() )
-print( "torch.cuda.device(0):", torch.cuda.device(0) )
-print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
+if CUDA:
+    print( "torch.cuda.is_available():", torch.cuda.is_available() )
+    print( "torch.cuda.device_count():", torch.cuda.device_count() )
+    print( "torch.cuda.device(0):", torch.cuda.device(0) )
+    print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 print( "dgl.__version_:", dgl.__version__ )
 
 
@@ -586,6 +587,22 @@ class DataSetFromYosys( DGLDataset ):
         # check_graph.remove_nodes_from( list(nx.isolates(check_graph)) )
         # print("nx.is_connected(check_graph)", nx.is_connected(check_graph))
         # del check_graph
+################### HARMONIC ######################################
+        if any( "harmonic" == s for s in self.ablationFeatures ):
+            print( "calculating harmonic!" )
+            aux_graph = self.graph.to_networkx()
+            nx_graph  = nx.Graph( aux_graph )
+            print( "nx_graph:\n", nx_graph, flush = True )
+            harmonic_scores = nx.harmonic_centrality( nx_graph )
+            harmonic_scores_list = list( harmonic_scores.values() )
+            min_score = min( harmonic_scores_list )
+            max_score = max( harmonic_scores_list )
+            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in harmonic_scores_list ] 
+            harmonic_tensor = torch.tensor( normalized_scores )
+            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, harmonic_tensor )
+            if 'harmonic' not in self.namesOfFeatures:
+                self.namesOfFeatures.append( 'harmonic' )
+            self.centralityToCsv( designPath, 'harmonic' )
 ################### SUBGRAPH ######################################
         if any( "subgraph" == s for s in self.ablationFeatures ):
             print( "calculating subgraph!" )
