@@ -43,6 +43,10 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
+validFeatures = [ 'percolation', 'harmonic', 'information', 'subgraph', 'load', 'betweenness', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+externalCentralities = [ 'closeness', 'betweenness' ]
+                         
+
 mainMaxIter      = 1
 FULLTRAIN        = True
 DOKFOLD          = False
@@ -51,26 +55,26 @@ MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'input_pins', 'type',  'output_pins', 'eigen', 'pageRank' ]  #, 'closeness', 'between' ] # logicDepth
+fullAblationCombs = [ 'closeness', 'betweenness' ]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'nangate-STDfeatures-missing-bpQuad-memPool'
+dsFolderName = 'asap7V0+closeness+between'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
-maxEpochs = 2
-minEpochs = 1
+maxEpochs = 250
+minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = False
+DOLEARN         = True
 DRAWOUTPUTS     = False
 DRAWCORRMATRIX  = False
-DRAWGRAPHDATA   = True
+DRAWGRAPHDATA   = False
 
 
 DEBUG           = 0 #1 for evaluation inside train
@@ -79,10 +83,11 @@ SKIPFINALEVAL   = False #TODO True
 SELF_LOOP = True
 COLAB     = False
 
-print( "torch.cuda.is_available():", torch.cuda.is_available() )
-print( "torch.cuda.device_count():", torch.cuda.device_count() )
-print( "torch.cuda.device(0):", torch.cuda.device(0) )
-print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
+if CUDA:
+    print( "torch.cuda.is_available():", torch.cuda.is_available() )
+    print( "torch.cuda.device_count():", torch.cuda.device_count() )
+    print( "torch.cuda.device(0):", torch.cuda.device(0) )
+    print( "torch.cuda.get_device_name(0):", torch.cuda.get_device_name(0) )
 print( "dgl.__version_:", dgl.__version__ )
 
 
@@ -531,26 +536,46 @@ class DataSetFromYosys( DGLDataset ):
         print( "      Circuit:", str( designPath ).rsplit( '/' )[-1] )
         print( "###########################################\n" )
         print( "self.ablationFeatures (_process_single):", type( self.ablationFeatures ), len( self.ablationFeatures ), self.ablationFeatures )
+        graphName = str( designPath ).rsplit( '/' )[-1]
         positions = pd.read_csv( str( designPath ) + "/gatesPosition_" + str( designPath ).rsplit( '/' )[-1] + ".csv"  )
         positions = positions.rename( columns = { "Name" : "name" } )
         # nodes_data = pd.read_csv( designPath / 'preProcessedGatesToHeat.csv', index_col = 'id' )
         nodes_data = pd.read_csv( designPath / 'preProcessedGatesToHeat.csv', index_col = 'id', dtype = { 'type':'int64', 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'float64', 'output_pins':'float64', 'logic_function':'string' } )                    
+        ################### PROCESS EXTERNAL CENTRALITIES   ###########################
+        print( "BEFORE MERGE by id (external centralities) nodes_data:", nodes_data.shape )#, "\n", nodes_data )                
+        for centr in externalCentralities:
+            #print( "loading centrality:", centr )
+            if centr in self.ablationFeatures:
+                external = pd.read_csv( str( designPath ) +'/'+ graphName+'-'+centr+'.csv' ) #, dtype = { 'type':'int64', 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'float64', 'output_pins':'float64', 'logic_function':'string' } )
+                #print( "external centralities pandas:", external.shape )
+                for col in external.columns:
+                    print("col", col)
+                    if col.startswith( 'id' ):
+                        external = external.rename( columns = { col: 'id' } )
+                        filtered_columns = [ col for col in external.columns if 'id' in col or col.startswith( 'feat' )]
+                        external = external[ filtered_columns ]
+                        break                
+                external.set_index('id', inplace=True)
+                nodes_data = pd.merge(nodes_data, external, left_index=True, right_index=True, how='left')
+                # nodes_data = pd.merge( nodes_data, external, on = 'id', how = 'left' ) 
+        print( "AFTER MERGE by id (external centralities) nodes_data:", nodes_data.shape )#, "\n", nodes_data )
+        print( "nodes_data columns:", list( nodes_data.columns ) )
+        nodes_data.to_csv( "nodes_data_"+ graphName+".csv", index = True )
+        ###############################################################################
         nodes_data = nodes_data.sort_index()
         edges_data = pd.read_csv( designPath / 'DGLedges.csv')
         edges_src  = torch.from_numpy( edges_data['Src'].to_numpy() )
         edges_dst  = torch.from_numpy( edges_data['Dst'].to_numpy() )
 
-        print( "BEFORE MERGE nodes_data:", nodes_data.shape )#, "\n", nodes_data )
+        print( "BEFORE MERGE by name nodes_data:", nodes_data.shape )#, "\n", nodes_data )
         nodes_data = pd.merge( nodes_data, positions, on = "name" )
-        print( "AFTER MERGE nodes_data:", nodes_data.shape )#, "\n", nodes_data )
-        
+        print( "AFTER MERGE by name nodes_data:", nodes_data.shape )#, "\n", nodes_data )  
         print( "self.ablationFeatures:", type( self.ablationFeatures ) )#, "\n", self.ablationFeatures )
 
         for column in self.ablationFeatures:
             if column not in nodes_data:
                 nodes_data[ column ] = 0
         #nodes_data.update(pd.DataFrame({column: 0 for column in self.ablationFeatures if column not in nodes_data}, index=[0]))
-        # df = nodes_data[ [ rawFeatName ] + [ labelName ] ]
         df = nodes_data[ stdCellFeats + [ labelName ] ]
         
         print("df.columns:",df.columns)
@@ -567,7 +592,7 @@ class DataSetFromYosys( DGLDataset ):
 
     ###################### BUILD GRAPH #####################################        
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
-        self.graph.name = str( designPath ).rsplit( '/' )[-1]
+        self.graph.name = graphName
 
         # if rawFeatName in self.ablationFeatures:
             # self.graph.ndata[ feat2d ] =  torch.tensor( nodes_data[ rawFeatName ].values )
@@ -592,26 +617,26 @@ class DataSetFromYosys( DGLDataset ):
         print( "isolated_nodes:", isolated_nodes.shape ) #, "\n", isolated_nodes )
         self.graph.remove_nodes( isolated_nodes )
         print( "\n---> AFTER REMOVED NODES:" )
-        print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )
+        print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )    
     ################### CLOSENESS  ################################################
-        #drawGraph( self.graph, self.graph.name )
-        if 'closeness' in self.ablationFeatures:
-            print( "calculating closeness!" )
-            aux_graph = self.graph.to_networkx()
-            nx_graph  = nx.Graph( aux_graph )
-            print( "nx_graph:\n", nx_graph, flush = True )
-            # print( ".nodes:\n", nx_graph.nodes(data=True))
-            # print( ".edges:\n", nx_graph.edges(data=True))
-            close_scores = nx.closeness_centrality( nx_graph )
-            # close_scores = nx.incremental_closeness_centrality( nx_graph )
-            close_scores_list = list( close_scores.values() )
-            min_score = min( close_scores_list )
-            max_score = max( close_scores_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in close_scores_list ] 
-            close_tensor = torch.tensor( normalized_scores )
-            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, close_tensor )
-            if 'Closeness' not in self.namesOfFeatures:
-                self.namesOfFeatures.append( 'Closeness' )
+        # #drawGraph( self.graph, self.graph.name )
+        # if 'closeness' in self.ablationFeatures:
+        #     print( "calculating closeness!" )
+        #     aux_graph = self.graph.to_networkx()
+        #     nx_graph  = nx.Graph( aux_graph )
+        #     print( "nx_graph:\n", nx_graph, flush = True )
+        #     # print( ".nodes:\n", nx_graph.nodes(data=True))
+        #     # print( ".edges:\n", nx_graph.edges(data=True))
+        #     close_scores = nx.closeness_centrality( nx_graph )
+        #     # close_scores = nx.incremental_closeness_centrality( nx_graph )
+        #     close_scores_list = list( close_scores.values() )
+        #     min_score = min( close_scores_list )
+        #     max_score = max( close_scores_list )
+        #     normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in close_scores_list ] 
+        #     close_tensor = torch.tensor( normalized_scores )
+        #     self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, close_tensor )
+        #     if 'Closeness' not in self.namesOfFeatures:
+        #         self.namesOfFeatures.append( 'Closeness' )
     ################### EIGENVECTOR  ################################################
         if 'eigen' in self.ablationFeatures:
             print( "calculating eigenvector!" )
@@ -627,41 +652,41 @@ class DataSetFromYosys( DGLDataset ):
             if 'Eigen' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'Eigen' )
     ################### GROUP BETWEENNESS  ################################################
-        #drawGraph( self.graph, self.graph.name )
-        if 'between' in self.ablationFeatures:
-            print( "calculating group betweenness!" )
-            aux_graph = self.graph.to_networkx()
-            nx_graph  = nx.Graph( aux_graph )
-            print( "nx_graph:\n", nx_graph, flush = True )
-            # print( ".nodes:\n", nx_graph.nodes(data=True))
-            # print( ".edges:\n", nx_graph.edges(data=True))
+        # #drawGraph( self.graph, self.graph.name )
+        # if 'betweenness' in self.ablationFeatures:
+        #     print( "calculating group betweenness!" )
+        #     aux_graph = self.graph.to_networkx()
+        #     nx_graph  = nx.Graph( aux_graph )
+        #     print( "nx_graph:\n", nx_graph, flush = True )
+        #     # print( ".nodes:\n", nx_graph.nodes(data=True))
+        #     # print( ".edges:\n", nx_graph.edges(data=True))
 
-            group_betweenness = {}
-            group_distance = 3
-            for node in nx_graph.nodes():
-                print( "node", node, flush = True )
-                subgraph = nx.ego_graph( nx_graph, node, radius = group_distance )
-                # group_betweenness[node] = nx.group_betweenness_centrality( nx_graph, subgraph )
-                if nx.is_connected( subgraph ) and len( subgraph ) > 2:
-                    group_betweenness[node] = nx.group_betweenness_centrality(nx_graph, subgraph)
-                else:
-                    group_betweenness[node] = {}
+        #     group_betweenness = {}
+        #     group_distance = 3
+        #     for node in nx_graph.nodes():
+        #         print( "node", node, flush = True )
+        #         subgraph = nx.ego_graph( nx_graph, node, radius = group_distance )
+        #         # group_betweenness[node] = nx.group_betweenness_centrality( nx_graph, subgraph )
+        #         if nx.is_connected( subgraph ) and len( subgraph ) > 2:
+        #             group_betweenness[node] = nx.group_betweenness_centrality(nx_graph, subgraph)
+        #         else:
+        #             group_betweenness[node] = {}
 
-            for node, centrality in group_betweenness.items():
-                print(f"Node {node}:")
-                if isinstance(centrality, float):
-                    print(f"  Group: {centrality}")
-                else:
-                    for group, centrality_score in centrality.items():
-                        print(f"  Group {group}: {centrality_score}")
-            group_betweenness_list = list( group_betweenness.values() )
-            min_score = min( group_betweenness_list )
-            max_score = max( group_betweenness_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in group_betweenness_list ] 
-            between_tensor = torch.tensor( normalized_scores )
-            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, between_tensor )
-            if 'Betweenness' not in self.namesOfFeatures:
-                self.namesOfFeatures.append( 'Betweenness' )
+        #     for node, centrality in group_betweenness.items():
+        #         print(f"Node {node}:")
+        #         if isinstance(centrality, float):
+        #             print(f"  Group: {centrality}")
+        #         else:
+        #             for group, centrality_score in centrality.items():
+        #                 print(f"  Group {group}: {centrality_score}")
+        #     group_betweenness_list = list( group_betweenness.values() )
+        #     min_score = min( group_betweenness_list )
+        #     max_score = max( group_betweenness_list )
+        #     normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in group_betweenness_list ] 
+        #     between_tensor = torch.tensor( normalized_scores )
+        #     self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, between_tensor )
+        #     if 'Betweenness' not in self.namesOfFeatures:
+        #         self.namesOfFeatures.append( 'Betweenness' )
     ################### PAGE RANK ################################################    
         if 'pageRank' in self.ablationFeatures:
             nx_graph = self.graph.to_networkx()
@@ -698,21 +723,7 @@ class DataSetFromYosys( DGLDataset ):
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, outDegree_tensor )
             if 'outDegree' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'outDegree' )
-    ################### KATZ ################################################
-        if 'katz' in self.ablationFeatures:
-            print( "calculating katzvector!", flush = True )
-            aux_graph = self.graph.to_networkx()
-            nx_graph  = nx.Graph( aux_graph )
-            katz_scores = nx.katz_centrality( nx_graph, max_iter = 500, tol = 1.0e-5 )
-            katz_scores_list = list( katz_scores.values() )
-            min_score = min( katz_scores_list )
-            max_score = max( katz_scores_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in katz_scores_list ] 
-            katz_tensor = torch.tensor( normalized_scores )
-            self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, katz_tensor )
-            if 'Katz' not in self.namesOfFeatures:
-                self.namesOfFeatures.append( 'Katz' )
-        ###################################################################
+##################################################################################                
         if SELF_LOOP:
             self.graph = dgl.add_self_loop( self.graph )           
         print( "self.ablationFeatures (_process_single):", type( self.ablationFeatures ), len( self.ablationFeatures ), self.ablationFeatures )
@@ -1285,9 +1296,14 @@ if __name__ == '__main__':
             print( "ablationList:", len( ablationList ), ablationList )
     else:
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
-        ablationList = [ ( 'inDegree', 'outDegree', 'input_pins', 'output_pins' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
+        ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
+    for item in ablationList:
+        for sub_item in item:
+            if sub_item not in validFeatures:
+                print(f"Error: '{sub_item}' is not in validFeatures.")
+                sys.exit()
     for mainIteration in range( 0, mainMaxIter ):
         print( "##################################################################################" )
         print( "########################## NEW MAIN RUN  ########################################" )
