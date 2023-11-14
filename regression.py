@@ -48,17 +48,17 @@ mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
 num_folds        = 2
-MANUALABLATION   = False
+MANUALABLATION   = True
 feat2d = 'feat' 
 stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'percolation' ]
+fullAblationCombs = [ 'between' ]
 
             
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'nangateV1'
+dsFolderName = 'ng45-onlyETH'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
@@ -71,7 +71,7 @@ patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
 DOLEARN         = False
-DRAWOUTPUTS     = True
+DRAWOUTPUTS     = False
 DRAWCORRMATRIX  = False
 DRAWGRAPHDATA   = True
 
@@ -712,7 +712,7 @@ class DataSetFromYosys( DGLDataset ):
 ################### BETWEENNESS  ################################################
         # if 'between' in self.ablationFeatures:
         if any( "between" == s for s in self.ablationFeatures ):
-            print( "calculating group betweenness!" )
+            print( "calculating betweenness!" )
             aux_graph = self.graph.to_networkx()
             nx_graph  = nx.Graph( aux_graph )
             print( "nx_graph:\n", nx_graph, flush = True )
@@ -1379,7 +1379,7 @@ if __name__ == '__main__':
             print( "ablationList:", len( ablationList ), ablationList )
     else:
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
-        ablationList = [ ( 'inDegree', 'outDegree', 'input_pins', 'output_pins' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
+        ablationList = [ ('between',), ('closeness',) ]# [ ( 'inDegree', 'outDegree', 'input_pins', 'output_pins' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
     for item in ablationList:
         for sub_item in item:
             if sub_item not in validFeatures:
