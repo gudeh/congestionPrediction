@@ -58,7 +58,7 @@ fullAblationCombs = [ 'between' ]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'ng45-onlyETH'
+dsFolderName = 'a7-SwervAndDynamic'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
@@ -1379,7 +1379,7 @@ if __name__ == '__main__':
             print( "ablationList:", len( ablationList ), ablationList )
     else:
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
-        ablationList = [ ('between',), ('closeness',) ]# [ ( 'inDegree', 'outDegree', 'input_pins', 'output_pins' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
+        ablationList = [ ('closeness',) ]# [ ( 'inDegree', 'outDegree', 'input_pins', 'output_pins' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
     for item in ablationList:
         for sub_item in item:
             if sub_item not in validFeatures:
