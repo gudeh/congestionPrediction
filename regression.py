@@ -51,7 +51,7 @@ mainMaxIter      = 1
 FULLTRAIN        = True
 DOKFOLD          = False
 num_folds        = 2
-MANUALABLATION   = False
+MANUALABLATION   = True
 feat2d = 'feat' 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
@@ -59,7 +59,7 @@ fullAblationCombs = [ 'closeness', 'betweenness' ]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'asap7V0+closeness+between'
+dsFolderName = 'asap7V1+closeness+between'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
@@ -71,10 +71,10 @@ improvement_threshold = 0.000001
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = True
+DOLEARN         = False
 DRAWOUTPUTS     = False
 DRAWCORRMATRIX  = False
-DRAWGRAPHDATA   = False
+DRAWGRAPHDATA   = True
 
 
 DEBUG           = 0 #1 for evaluation inside train
@@ -354,9 +354,13 @@ class DataSetFromYosys( DGLDataset ):
             print("************* INDSIDE DRAWHEAT CENTRALITY *****************")
             print("Circuit:", designName)
             print("feat2d:", feat2d)
+            if g.ndata.get(feat2d) is None:
+                print( "g.ndata.get(feat2d) is None!" )
+                break
             print("g.ndata[feat2d]:", type(g.ndata[feat2d]), g.ndata[feat2d].shape, flush=True)
             positions = g.ndata["position"].to(torch.float32).to("cpu")
             feat_values = g.ndata[feat2d]
+            label_values = g.ndata[labelName]
             num_columns = 1 if len( feat_values.shape ) == 1  else feat_values.shape[1]  # Get the number of columns in the 2D tensor
             if num_columns != len(self.namesOfFeatures):
                 print("ERROR: namesOfFeatures and num_columns with different sizes in drawHeatCentrality!!")
@@ -384,17 +388,42 @@ class DataSetFromYosys( DGLDataset ):
             cmap = cm.RdYlGn  # Use the same colormap as your rectangles
             cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
             cbar.set_label('Reference Colorbar')
-            plt.savefig(designName + "-" + fileName)
+            plt.savefig(f"{designName}-Features-{fileName}")
             plt.close('all')
             for ax in axes:
                 ax.clear()
             plt.clf()
+
+            # Label figure
+            label_values = g.ndata[labelName]
+            fig, ax = plt.subplots(figsize=(6, 6))
+
+            for pos, label_value in zip(positions, label_values):
+                xmin, ymin, xmax, ymax = pos.tolist()
+                rect = Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, facecolor=cm.RdYlGn((label_value - label_values.min()) / (label_values.max() - label_values.min())))
+                ax.add_patch(rect)
+
+            ax.set_xlim(positions[:, 0].min() - 1, positions[:, 2].max() + 4)
+            ax.set_ylim(positions[:, 1].min() - 1, positions[:, 3].max() + 1)
+            ax.set_title(f"{labelName} Visualization")
+            ax.set_aspect('equal')
+
+            cax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
+            cmap = cm.RdYlGn
+            cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
+            cbar.set_label('Reference Colorbar')
+
+            plt.savefig(f"{designName}-{labelName}-{fileName}")
+            plt.close('all')
 
 # sns.boxplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy())
 # stats.probplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), plot=plt)
 #sns.violinplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), inner="quartile")            
     def drawDataAnalysis(self, fileName):
         print("************* INDSIDE DRAW DATA ANALYSIS *****************", flush=True)
+        if self.graphs[0].ndata.get(feat2d) is None:
+            print( "g.ndata.get(feat2d) is None!" )
+            return
         agg_features = [graph.ndata[feat2d] for graph in self.graphs]
         agg_labels = [graph.ndata[labelName] for graph in self.graphs]
 
@@ -493,6 +522,9 @@ class DataSetFromYosys( DGLDataset ):
         print("************* INSIDE DRAW DATA ANALYSIS FOR EACH GRAPH *****************", flush=True)
         for i, graph in enumerate(self.graphs):
             print("graph.name:", graph.name)
+            if graph.ndata.get(feat2d) is None:
+                print( "g.ndata.get(feat2d) is None!" )
+                break
             agg_features = graph.ndata[feat2d]
             agg_labels = graph.ndata[labelName]
             # num_features = agg_features.shape[1]
@@ -544,23 +576,27 @@ class DataSetFromYosys( DGLDataset ):
         ################### PROCESS EXTERNAL CENTRALITIES   ###########################
         print( "BEFORE MERGE by id (external centralities) nodes_data:", nodes_data.shape )#, "\n", nodes_data )                
         for centr in externalCentralities:
-            #print( "loading centrality:", centr )
+            # print( "loading centrality:", centr )
             if centr in self.ablationFeatures:
-                external = pd.read_csv( str( designPath ) +'/'+ graphName+'-'+centr+'.csv' ) #, dtype = { 'type':'int64', 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'float64', 'output_pins':'float64', 'logic_function':'string' } )
-                #print( "external centralities pandas:", external.shape )
+                external = pd.read_csv( str( designPath ) +'/'+ graphName+'-'+centr+'.csv' ) 
+                # print( "external centralities pandas:", external.shape )
                 for col in external.columns:
                     print("col", col)
                     if col.startswith( 'id' ):
                         external = external.rename( columns = { col: 'id' } )
-                        filtered_columns = [ col for col in external.columns if 'id' in col or col.startswith( 'feat' )]
+                        filtered_columns = [ col for col in external.columns if 'id' in col or col.startswith( 'feat' ) ]
                         external = external[ filtered_columns ]
-                        break                
-                external.set_index('id', inplace=True)
-                nodes_data = pd.merge(nodes_data, external, left_index=True, right_index=True, how='left')
+                        external = external.rename( columns = lambda x: centr if x.startswith( 'feat' ) else x )
+                        # if centr not in self.namesOfFeatures:
+                        #     self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, torch.tensor( nodes_data[ centr ].values ) )
+                        #     self.namesOfFeatures.append( centr )
+                        break
+                external.set_index( 'id', inplace = True )
+                nodes_data = pd.merge( nodes_data, external, left_index=True, right_index=True, how='left')
                 # nodes_data = pd.merge( nodes_data, external, on = 'id', how = 'left' ) 
         print( "AFTER MERGE by id (external centralities) nodes_data:", nodes_data.shape )#, "\n", nodes_data )
         print( "nodes_data columns:", list( nodes_data.columns ) )
-        nodes_data.to_csv( "nodes_data_"+ graphName+".csv", index = True )
+        # nodes_data.to_csv( "nodes_data_"+ graphName+".csv", index = True )
         ###############################################################################
         nodes_data = nodes_data.sort_index()
         edges_data = pd.read_csv( designPath / 'DGLedges.csv')
@@ -594,12 +630,13 @@ class DataSetFromYosys( DGLDataset ):
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
         self.graph.name = graphName
 
-        # if rawFeatName in self.ablationFeatures:
-            # self.graph.ndata[ feat2d ] =  torch.tensor( nodes_data[ rawFeatName ].values )
-            # if rawFeatName not in self.namesOfFeatures:
-            #     self.namesOfFeatures.append( rawFeatName )
+        for centr in externalCentralities:
+            if centr in self.ablationFeatures:
+                self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, torch.tensor( nodes_data[ centr ].values ) )
+                if centr not in self.namesOfFeatures:                    
+                    self.namesOfFeatures.append( centr )        
+        
         for featStr in stdCellFeats:
-            #self.graph.ndata[ feat2d ] =  torch.tensor( nodes_data[ featStr ].values )
             if featStr in self.ablationFeatures:
                 self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, torch.tensor( nodes_data[ featStr ].values ) )
                 if featStr not in self.namesOfFeatures:
@@ -1296,7 +1333,8 @@ if __name__ == '__main__':
             print( "ablationList:", len( ablationList ), ablationList )
     else:
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
-        ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
+        #ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
+        ablationList = [(string,) for string in validFeatures]
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
     for item in ablationList:
@@ -1375,7 +1413,8 @@ if __name__ == '__main__':
                 theDataset.drawDataAnalysis( dsFolderName+"-"+str( ablationIter ) )
                 theDataset.drawDataAnalysisForEachGraph( dsFolderName+"-"+str( ablationIter ) )
             if not DOLEARN:
-                sys.exit()
+                # sys.exit()
+                continue
             #TODO HOW TO IMPLEMENT THIS ??
             # if DOKFOLD:
             kf = KFold( n_splits = num_folds )
