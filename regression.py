@@ -74,7 +74,8 @@ accumulation_steps = 4
 DOLEARN         = False
 DRAWOUTPUTS     = False
 DRAWCORRMATRIX  = False
-DRAWGRAPHDATA   = True
+DRAWGRAPHDATA   = False
+DRAWHEATCENTR   = True
 
 
 DEBUG           = 0 #1 for evaluation inside train
@@ -349,6 +350,7 @@ class DataSetFromYosys( DGLDataset ):
         
     def drawHeatCentrality(self, fileName, clip_min=None, clip_max=None):
         print("self.namesOfFeatures:", self.namesOfFeatures)
+        labelDone = False
         for g in self.graphs:
             designName = g.name
             print("************* INDSIDE DRAWHEAT CENTRALITY *****************")
@@ -388,33 +390,31 @@ class DataSetFromYosys( DGLDataset ):
             cmap = cm.RdYlGn  # Use the same colormap as your rectangles
             cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
             cbar.set_label('Reference Colorbar')
-            plt.savefig(f"{designName}-Features-{fileName}")
+            plt.savefig(f"heatMap-{designName}-{fileName}")
             plt.close('all')
             for ax in axes:
                 ax.clear()
             plt.clf()
 
             # Label figure
-            label_values = g.ndata[labelName]
-            fig, ax = plt.subplots(figsize=(6, 6))
-
-            for pos, label_value in zip(positions, label_values):
-                xmin, ymin, xmax, ymax = pos.tolist()
-                rect = Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, facecolor=cm.RdYlGn((label_value - label_values.min()) / (label_values.max() - label_values.min())))
-                ax.add_patch(rect)
-
-            ax.set_xlim(positions[:, 0].min() - 1, positions[:, 2].max() + 4)
-            ax.set_ylim(positions[:, 1].min() - 1, positions[:, 3].max() + 1)
-            ax.set_title(f"{labelName} Visualization")
-            ax.set_aspect('equal')
-
-            cax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
-            cmap = cm.RdYlGn
-            cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
-            cbar.set_label('Reference Colorbar')
-
-            plt.savefig(f"{designName}-{labelName}-{fileName}")
-            plt.close('all')
+            if not labelDone:
+                label_values = g.ndata[labelName]
+                fig, ax = plt.subplots(figsize=(6, 6))
+                for pos, label_value in zip(positions, label_values):
+                    xmin, ymin, xmax, ymax = pos.tolist()
+                    rect = Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, facecolor=cm.RdYlGn((label_value - label_values.min()) / (label_values.max() - label_values.min())))
+                    ax.add_patch(rect)
+                ax.set_xlim(positions[:, 0].min() - 1, positions[:, 2].max() + 4)
+                ax.set_ylim(positions[:, 1].min() - 1, positions[:, 3].max() + 1)
+                ax.set_title(f"{labelName} Visualization")
+                ax.set_aspect('equal')
+                cax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
+                cmap = cm.RdYlGn
+                cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
+                cbar.set_label('Reference Colorbar')
+                plt.savefig(f"heatMap-{designName}-Label-"+dsFolderName)
+                plt.close('all')
+                labelDone = True
 
 # sns.boxplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy())
 # stats.probplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), plot=plt)
@@ -518,7 +518,7 @@ class DataSetFromYosys( DGLDataset ):
     #     plt.clf()
         
 
-    def drawDataAnalysisForEachGraph(self, filePrefix):
+    def drawDataAnalysisPerGraph(self, filePrefix):
         print("************* INSIDE DRAW DATA ANALYSIS FOR EACH GRAPH *****************", flush=True)
         for i, graph in enumerate(self.graphs):
             print("graph.name:", graph.name)
@@ -1334,7 +1334,7 @@ if __name__ == '__main__':
     else:
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
         #ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
-        ablationList = [(string,) for string in validFeatures]
+        ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)]
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
     for item in ablationList:
@@ -1378,12 +1378,6 @@ if __name__ == '__main__':
                 copied_list = [abbreviations.get(s, s[:1].capitalize()) for s in ablationIter]
                 print("copied_list for ablationResult:", copied_list)
 
-                # # copied_list = [s[:1].capitalize() for s in ablationIter]
-                # copied_list = [s for s in ablationIter]
-                # if len( copied_list ) > 1:
-                #     f.write( "; ".join( copied_list ) )
-                # else:
-                #     f.write( str( copied_list ) )
             print( "%%%%%%%%%%%%%%%%%%%%%%%%%%\nablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, "\n%%%%%%%%%%%%%%%%%%%%%%%%%%%", flush = True )
             ablationIter = list( ablationIter )
             if os.path.exists( imageOutput ):
@@ -1404,14 +1398,16 @@ if __name__ == '__main__':
             spearmanTrain = []
             
 
-            theDataset = DataSetFromYosys( listDir, ablationIter )#, mode='train' )
+            theDataset = DataSetFromYosys( listDir, ablationIter )
             if DRAWCORRMATRIX:
-                theDataset.drawSingleCorrelationMatrix( dsFolderName+"-"+str( ablationIter ) )
-                # theDataset.drawCorrelationPerGraph( dsFolderName+"-"+str( ablationIter ) )
-            if DRAWGRAPHDATA:# and not FULLTRAIN:
-                theDataset.drawHeatCentrality( dsFolderName+"-"+str( ablationIter ) )
-                theDataset.drawDataAnalysis( dsFolderName+"-"+str( ablationIter ) )
-                theDataset.drawDataAnalysisForEachGraph( dsFolderName+"-"+str( ablationIter ) )
+                theDataset.drawSingleCorrelationMatrix( ''.join( ablationIter )+"-"+dsFolderName )
+                # theDataset.drawCorrelationPerGraph( ''.join( ablationIter )+"-"+dsFolderName )
+            if DRAWGRAPHDATA:
+                theDataset.drawDataAnalysis(   ''.join( ablationIter )+"-"+dsFolderName )
+                # theDataset.drawDataAnalysisPerGraph( ''.join( ablationIter )+"-"+dsFolderName )
+            if DRAWHEATCENTR:
+                theDataset.drawHeatCentrality( ''.join( ablationIter )+"-"+dsFolderName )
+                
             if not DOLEARN:
                 # sys.exit()
                 continue
@@ -1602,7 +1598,7 @@ if __name__ == '__main__':
         new_counter = 0
     folder_name = str(new_counter)
     os.mkdir(folder_name)
-    excluded_folders = ["nangate-STDfeatures-missing-bpQuad-memPool", "nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset", "asap7"]
+    excluded_folders = [ "asap7", "nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset"]
     for item in os.listdir():
         print( "item:", item )
         if not re.match( pattern, item ) and item not in excluded_folders:
