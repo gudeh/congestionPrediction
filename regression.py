@@ -48,17 +48,17 @@ mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
 num_folds        = 2
-MANUALABLATION   = True
+MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type' ] #, 'area', 'input_pins', 'output_pins' ]
 #fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'between' ]
+fullAblationCombs = [ 'percolation' ]
 
             
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'a7-SwervAndDynamic'
+dsFolderName = 'ng-BPonly'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
@@ -73,7 +73,7 @@ accumulation_steps = 4
 DOLEARN         = False
 DRAWOUTPUTS     = False
 DRAWCORRMATRIX  = False
-DRAWGRAPHDATA   = True
+DRAWGRAPHDATA   = False
 
 
 DEBUG           = 0 #1 for evaluation inside train
