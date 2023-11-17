@@ -24,6 +24,7 @@ from matplotlib import cm
 import matplotlib.colorbar as mcb
 import matplotlib.colors as mcolors
 import matplotlib.patches as patches
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import torch
 import torch.nn as nn
@@ -43,7 +44,8 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-validFeatures = [ 'percolation', 'harmonic', 'information', 'subgraph', 'load', 'betweenness', 'closeness', 'CFbetween', 'CFcloseness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+validFeatures = [ 'percolation', 'harmonic', 'load', 'betweenness', 'closeness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+#validFeatures = [ 'betweenness', 'closeness', 'input_pins', 'output_pins' ]
 externalCentralities = [ 'closeness', 'betweenness' ]
                          
 
@@ -59,7 +61,7 @@ fullAblationCombs = [ 'closeness', 'betweenness' ]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'asap7V1+closeness+between'
+dsFolderName = 'nangateV1+closeness+between' #'asap7V1+closeness+between'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
@@ -73,9 +75,9 @@ accumulation_steps = 4
 
 DOLEARN         = False
 DRAWOUTPUTS     = False
-DRAWCORRMATRIX  = False
+DRAWCORRMATRIX  = True
 DRAWGRAPHDATA   = False
-DRAWHEATCENTR   = True
+DRAWHEATCENTR   = False
 
 
 DEBUG           = 0 #1 for evaluation inside train
@@ -319,39 +321,90 @@ class DataSetFromYosys( DGLDataset ):
         plt.close( 'all' )
         plt.clf()
         
-    def drawSingleCorrelationMatrix( self, fileName ):
-        print( "Start: drawSingleCorrelationMatrix!" )
+    # def drawSingleCorrelationMatrix( self, fileName ):
+    #     print( "Start: drawSingleCorrelationMatrix!" )
+    #     num_graphs = len(self.graphs)
+    #     all_data = []
+    #     for graph in self.graphs:
+    #         tensor = graph.ndata[feat2d]
+    #         reshape = graph.ndata[labelName].view(-1, 1)
+    #         tensor = torch.cat((tensor, reshape), 1)
+    #         all_data.append(tensor)
+    #     combined_data = torch.cat(all_data, 0)
+    #     correlation_matrix = np.corrcoef(combined_data, rowvar=False)
+    #     fig, ax = plt.subplots(figsize=(12, 8))
+    #     im = ax.imshow(correlation_matrix, cmap='turbo', interpolation='nearest', vmin=-1, vmax=1)
+    #     ax.set_title("Combined Correlation Matrix")
+    #     ax.set_xticks(np.arange(len(self.namesOfFeatures) + 1))
+    #     ax.set_yticks(np.arange(len(self.namesOfFeatures) + 1))
+    #     ax.set_xticklabels(self.namesOfFeatures + [labelName], rotation=30)
+    #     ax.set_yticklabels(self.namesOfFeatures + [labelName])        
+    #     for j in range(len(self.namesOfFeatures) + 1):
+    #         for k in range(len(self.namesOfFeatures) + 1):
+    #             ax.text(k, j, format(correlation_matrix[j, k], ".1f"),
+    #                     ha="center", va="center", color="white")
+    #     fig.tight_layout()
+    #     cbar = fig.colorbar(im)
+    #     plt.savefig("corrMatrix-" + fileName + ".png")
+    #     plt.close('all')
+    #     plt.clf()
+    #     print( "End: drawSingleCorrelationMatrix!" )
+
+    def drawSingleCorrelationMatrix(self, fileName):
+        print("Start: drawSingleCorrelationMatrix!")
         num_graphs = len(self.graphs)
         all_data = []
+
         for graph in self.graphs:
+            print("graph.ndata:", graph.ndata)
             tensor = graph.ndata[feat2d]
             reshape = graph.ndata[labelName].view(-1, 1)
             tensor = torch.cat((tensor, reshape), 1)
             all_data.append(tensor)
+
         combined_data = torch.cat(all_data, 0)
-        correlation_matrix = np.corrcoef(combined_data, rowvar=False)
-        fig, ax = plt.subplots(figsize=(12, 8))
-        im = ax.imshow(correlation_matrix, cmap='turbo', interpolation='nearest', vmin=-1, vmax=1)
-        ax.set_title("Combined Correlation Matrix")
-        ax.set_xticks(np.arange(len(self.namesOfFeatures) + 1))
-        ax.set_yticks(np.arange(len(self.namesOfFeatures) + 1))
-        ax.set_xticklabels(self.namesOfFeatures + [labelName], rotation=30)
-        ax.set_yticklabels(self.namesOfFeatures + [labelName])        
+        pearson_corr_matrix = np.corrcoef(combined_data, rowvar=False)
+        spearman_corr_matrix, _ = spearmanr(combined_data, axis=0)
+        fig, axes = plt.subplots(1, 2, figsize=(18, 8))
+
+        im1 = axes[0].imshow(pearson_corr_matrix, cmap='seismic', interpolation='nearest', vmin=-1, vmax=1)
+        axes[0].set_title("Pearson Correlation Matrix")
+        axes[0].set_xticks(np.arange(len(self.namesOfFeatures) + 1))
+        axes[0].set_yticks(np.arange(len(self.namesOfFeatures) + 1))
+        axes[0].set_xticklabels(self.namesOfFeatures + [labelName], rotation=30)
+        axes[0].set_yticklabels(self.namesOfFeatures + [labelName])
+
         for j in range(len(self.namesOfFeatures) + 1):
             for k in range(len(self.namesOfFeatures) + 1):
-                ax.text(k, j, format(correlation_matrix[j, k], ".1f"),
-                        ha="center", va="center", color="white")
+                axes[0].text(k, j, format(pearson_corr_matrix[j, k], ".2f"),
+                             ha="center", va="center", color="black")
+
+        im2 = axes[1].imshow(spearman_corr_matrix, cmap='seismic', interpolation='nearest', vmin=-1, vmax=1)
+        axes[1].set_title("Spearman Correlation Matrix")
+        axes[1].set_xticks(np.arange(len(self.namesOfFeatures) + 1))
+        axes[1].set_yticks(np.arange(len(self.namesOfFeatures) + 1))
+        axes[1].set_xticklabels(self.namesOfFeatures + [labelName], rotation=30)
+        axes[1].set_yticklabels(self.namesOfFeatures + [labelName])
+
+        for j in range(len(self.namesOfFeatures) + 1):
+            for k in range(len(self.namesOfFeatures) + 1):
+                axes[1].text(k, j, format(spearman_corr_matrix[j, k], ".2f"),
+                             ha="center", va="center", color="black")
+
         fig.tight_layout()
-        cbar = fig.colorbar(im)
-        plt.savefig("corrMatrix-" + fileName + ".png")
+        cbar1 = fig.colorbar(im1, ax=axes[0])
+        cbar2 = fig.colorbar(im2, ax=axes[1])
+
+        plt.savefig("combined_corrMatrices-" + fileName + ".png")
         plt.close('all')
         plt.clf()
-        print( "End: drawSingleCorrelationMatrix!" )
+
+        print("End: drawSingleCorrelationMatrix!")
         
     def drawHeatCentrality(self, fileName, clip_min=None, clip_max=None):
         print("self.namesOfFeatures:", self.namesOfFeatures)
-        labelDone = False
         for g in self.graphs:
+            labelDone = False
             designName = g.name
             print("************* INDSIDE DRAWHEAT CENTRALITY *****************")
             print("Circuit:", designName)
@@ -360,19 +413,23 @@ class DataSetFromYosys( DGLDataset ):
                 print( "g.ndata.get(feat2d) is None!" )
                 break
             print("g.ndata[feat2d]:", type(g.ndata[feat2d]), g.ndata[feat2d].shape, flush=True)
+            print( "features:", self.namesOfFeatures )
+            print( g.ndata[feat2d], flush=True )
             positions = g.ndata["position"].to(torch.float32).to("cpu")
-            feat_values = g.ndata[feat2d]
-            label_values = g.ndata[labelName]
+            feat_values = g.ndata[ feat2d ]
+            
+            label_values = g.ndata[ labelName ]
             num_columns = 1 if len( feat_values.shape ) == 1  else feat_values.shape[1]  # Get the number of columns in the 2D tensor
             if num_columns != len(self.namesOfFeatures):
                 print("ERROR: namesOfFeatures and num_columns with different sizes in drawHeatCentrality!!")
             # fig, axes = plt.subplots(1, num_columns, figsize=(6 * num_columns, 6))
-            if num_columns == 1:
+            if  num_columns == 1:
                 fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-                axes = [ax]  # Create a list with a single Axes object
+                axes = [ax,ax]  # Create a list with a single Axes object
             else:
-                fig, axes = plt.subplots(1, num_columns, figsize=(6 * num_columns, 6))
-            for i, ax in enumerate(axes):
+                #fig, axes = plt.subplots(1, num_columns, figsize=(6 * num_columns, 6))
+                fig, axes = plt.subplots(1, num_columns + 1, figsize=(8 * (num_columns + 1), 6))
+            for i, ax in enumerate(axes[:-1]):
                 dummy_image = ax.imshow([[0, 1]], cmap='coolwarm')
                 feat_values_i = feat_values if len(feat_values.shape) == 1 else feat_values[:, i]
                 clip_min = feat_values_i.min()
@@ -386,10 +443,28 @@ class DataSetFromYosys( DGLDataset ):
                 ax.set_ylim(positions[:, 1].min() - 1, positions[:, 3].max() + 1)
                 ax.set_title(self.namesOfFeatures[i])
                 ax.set_aspect('equal')  # Set aspect ratio to equal for proper rectangle visualization
-            cax = fig.add_axes([0.15, 0.05, 0.7, 0.03])  # Define colorbar position (adjust as needed)
+            # Plot labels
+            if( num_columns > 1 ):
+                ax = axes[-1]
+                for pos, label_value in zip(positions, label_values):
+                    xmin, ymin, xmax, ymax = pos.tolist()
+                    rect = Rectangle((xmin, ymin), xmax - xmin, ymax - ymin, facecolor=cm.RdYlGn((label_value - label_values.min()) / (label_values.max() - label_values.min())))
+                    ax.add_patch(rect)
+                ax.set_xlim(positions[:, 0].min() - 1, positions[:, 2].max() + 4)
+                ax.set_ylim(positions[:, 1].min() - 1, positions[:, 3].max() + 1)
+                ax.set_title(f"{labelName}")
+                ax.set_aspect('equal')
+            
+            # cax = fig.add_axes([0.15, 0.05, 0.7, 0.03])  # Define colorbar position (adjust as needed)
             cmap = cm.RdYlGn  # Use the same colormap as your rectangles
-            cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
+            # cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.1)  # You can adjust the size and pad as needed
+
+            # Add colorbar
+            cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='vertical')
             cbar.set_label('Reference Colorbar')
+            # plt.tight_layout()
             plt.savefig(f"heatMap-{designName}-{fileName}")
             plt.close('all')
             for ax in axes:
@@ -397,7 +472,8 @@ class DataSetFromYosys( DGLDataset ):
             plt.clf()
 
             # Label figure
-            if not labelDone:
+            if not labelDone and len( self.namesOfFeatures ) == 1:
+                print( "drawing label heatmap!" )
                 label_values = g.ndata[labelName]
                 fig, ax = plt.subplots(figsize=(6, 6))
                 for pos, label_value in zip(positions, label_values):
@@ -408,13 +484,14 @@ class DataSetFromYosys( DGLDataset ):
                 ax.set_ylim(positions[:, 1].min() - 1, positions[:, 3].max() + 1)
                 ax.set_title(f"{labelName} Visualization")
                 ax.set_aspect('equal')
-                cax = fig.add_axes([0.15, 0.05, 0.7, 0.03])
+                cax = fig.add_axes([0.15, -0.1, 0.7, 0.03])
                 cmap = cm.RdYlGn
                 cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
                 cbar.set_label('Reference Colorbar')
                 plt.savefig(f"heatMap-{designName}-Label-"+dsFolderName)
                 plt.close('all')
                 labelDone = True
+                print( "DONE drawing label heatmap!" )
 
 # sns.boxplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy())
 # stats.probplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), plot=plt)
@@ -1334,7 +1411,8 @@ if __name__ == '__main__':
     else:
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
         #ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
-        ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)]
+        # ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)]
+        ablationList = [tuple(validFeatures)]
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
     for item in ablationList:
@@ -1400,13 +1478,13 @@ if __name__ == '__main__':
 
             theDataset = DataSetFromYosys( listDir, ablationIter )
             if DRAWCORRMATRIX:
-                theDataset.drawSingleCorrelationMatrix( ''.join( ablationIter )+"-"+dsFolderName )
+                theDataset.drawSingleCorrelationMatrix( '|'.join( ablationIter )+"-"+dsFolderName )
                 # theDataset.drawCorrelationPerGraph( ''.join( ablationIter )+"-"+dsFolderName )
             if DRAWGRAPHDATA:
-                theDataset.drawDataAnalysis(   ''.join( ablationIter )+"-"+dsFolderName )
+                theDataset.drawDataAnalysis(   '|'.join( ablationIter )+"-"+dsFolderName )
                 # theDataset.drawDataAnalysisPerGraph( ''.join( ablationIter )+"-"+dsFolderName )
             if DRAWHEATCENTR:
-                theDataset.drawHeatCentrality( ''.join( ablationIter )+"-"+dsFolderName )
+                theDataset.drawHeatCentrality( '|'.join( ablationIter )+"-"+dsFolderName )
                 
             if not DOLEARN:
                 # sys.exit()
@@ -1598,7 +1676,7 @@ if __name__ == '__main__':
         new_counter = 0
     folder_name = str(new_counter)
     os.mkdir(folder_name)
-    excluded_folders = [ "asap7", "nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset"]
+    excluded_folders = [ "nangateV1+closeness+between", "asap7V1+closeness+between", "nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset"]
     for item in os.listdir():
         print( "item:", item )
         if not re.match( pattern, item ) and item not in excluded_folders:
