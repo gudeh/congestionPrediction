@@ -53,15 +53,16 @@ mainMaxIter      = 1
 FULLTRAIN        = True
 DOKFOLD          = False
 num_folds        = 2
-MANUALABLATION   = True
+MANUALABLATION   = False
 feat2d = 'feat' 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
-#fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree' ]  #, 'closeness', 'between' ] # logicDepth
-fullAblationCombs = [ 'closeness', 'betweenness' ]
+fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'inDegree', 'outDegree', 'type', 'eigen', 'pageRank' , 'closeness', 'betweenness' ]
+#fullAblationCombs = [ 'closeness', 'betweenness' ]
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'nangateV1+closeness+between' #'asap7V1+closeness+between'
+#dsFolderName = 'nangateV1+closeness+between'
+dsFolderName = 'asap7V1+closeness+between'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
@@ -73,9 +74,9 @@ improvement_threshold = 0.000001
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = False
+DOLEARN         = True
 DRAWOUTPUTS     = False
-DRAWCORRMATRIX  = True
+DRAWCORRMATRIX  = False
 DRAWGRAPHDATA   = False
 DRAWHEATCENTR   = False
 
@@ -1404,9 +1405,11 @@ if __name__ == '__main__':
 
     if not MANUALABLATION:
         ablationList = []
-        for combAux in range( 1, len( fullAblationCombs ) + 1 ):
-            print( "iteration:", combAux, ", combinations:", len( list( combinations( fullAblationCombs, combAux ) ) ) )
-            ablationList += list( combinations( fullAblationCombs, combAux ) )
+        minCombSize = 4
+        maxCombSize = minCombSize + 1 # len( fullAblationCombs ) + 1
+        for combSize in range( minCombSize, maxCombSize  ):
+            print( "combinationSize:", combSize, ", combinations:", len( list( combinations( fullAblationCombs, combSize) ) ) )
+            ablationList += list( combinations( fullAblationCombs, combSize ) )
             print( "ablationList:", len( ablationList ), ablationList )
     else:
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
@@ -1451,12 +1454,15 @@ if __name__ == '__main__':
                     'inDegree': 'ID',
                     'outDegree': 'OD',
                     'input_pins': 'IP',
-                    'output_pins': 'OP'
+                    'output_pins': 'OP',
+                    'percolation': 'PR',
+                    'pageRank':    'PG'
                 }
-                copied_list = [abbreviations.get(s, s[:1].capitalize()) for s in ablationIter]
+                copied_list = [ abbreviations.get( s, s[:1].capitalize() ) for s in ablationIter ]
                 print("copied_list for ablationResult:", copied_list)
+                f.write( '|'.join( copied_list ) )
 
-            print( "%%%%%%%%%%%%%%%%%%%%%%%%%%\nablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, "\n%%%%%%%%%%%%%%%%%%%%%%%%%%%", flush = True )
+            print( "\n%%%%%%%%%%%%%%%%%%%%%%%%%%\nablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, "\n%%%%%%%%%%%%%%%%%%%%%%%%%%%\n", flush = True )
             ablationIter = list( ablationIter )
             if os.path.exists( imageOutput ):
                 shutil.rmtree( imageOutput )
@@ -1542,7 +1548,7 @@ if __name__ == '__main__':
                 theDataset.printDataset()
                 
                 writerName =  "-" + labelName +"-"+ str( len( train_indices ) ) +"-"+ str( len( test_indices ) )
-                writerName += "- " + str( ablationIter ) + "-" + str( mainIteration )
+                writerName += "-" + '|'.join( ablationIter ) + "-" + str( mainIteration )
                 writerName += " T-"+ ';'.join( theDataset.getNames()[i] for i in test_indices )
                 finalEpoch, maxMem, avergMem = train( train_dataloader, device, model, writerName )
                 finalEpoch += 1
