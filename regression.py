@@ -53,7 +53,7 @@ mainMaxIter      = 1
 FULLTRAIN        = True
 DOKFOLD          = False
 num_folds        = 2
-MANUALABLATION   = False
+MANUALABLATION   = True
 feat2d = 'feat' 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
 fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'inDegree', 'outDegree', 'type', 'eigen', 'pageRank' , 'closeness', 'betweenness' ]
@@ -61,24 +61,25 @@ fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'inDegree', 'outDegre
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-#dsFolderName = 'nangateV1+closeness+between'
-dsFolderName = 'asap7V1+closeness+between'
+dsFolderName = 'nangateV1+closeness+between'
+#dsFolderName = 'asap7V1+closeness+between'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
-maxEpochs = 250
-minEpochs = 150
+maxEpochs = 2
+minEpochs = 1
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = True
+DOLEARN         = False 
 DRAWOUTPUTS     = False
-DRAWCORRMATRIX  = False
-DRAWGRAPHDATA   = False
+DRAWCORRMATRIX  = True
+DRAWGRAPHDATA   = True
 DRAWHEATCENTR   = False
+REMOVEFAKERAM   = True
 
 
 DEBUG           = 0 #1 for evaluation inside train
@@ -126,43 +127,47 @@ def dynamicConcatenate( featTensor, tensor2 ):
     return ret
 
 
-def process_and_write_csvs(paths):
+def process_and_write_csvs( paths ):
     categorical_columns=["type"]
     columns_to_normalize = [ labelName, 'area', 'input_pins', 'output_pins'  ] #+ stdCellFeats
-
-    # Step 1: Initialize an empty dataframe to store all data
     master_df = pd.DataFrame()
-
     # Step 3: Read and concatenate all CSVs into the master dataframe
     for path in paths:
         csv_path = os.path.join(path, "gatesToHeatSTDfeatures.csv")
         if os.path.isfile(csv_path):
             df = pd.read_csv( csv_path, index_col = 'id', dtype = { 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'int64', 'output_pins':'int64', 'logic_function':'string' } )
-            master_df = pd.concat([master_df, df], ignore_index=True)
-
-    master_df = master_df[master_df[labelName] > 0]
+            master_df = pd.concat( [ master_df, df ], ignore_index = True )
+    master_df = master_df[ master_df[ labelName ] > 0 ]
+    if REMOVEFAKERAM:
+        master_df.loc[ master_df[ 'type' ].str.contains( 'fakeram', case = False ), 'type' ] = "-1"
+        master_df.loc[ master_df[ 'type' ] == '-1', 'area'] = 0
+        master_df.loc[ master_df[ 'type' ] == '-1', 'input_pins'] = 0
+        master_df.loc[ master_df[ 'type' ] == '-1', 'output_pins'] = 0
+    # master_df.to_csv("master_df")
+    
     # Step 2: Determine the min and max values for columns to normalize
     # min_values = 0 #master_df[columns_to_normalize].min()
-    min_values = master_df[columns_to_normalize].replace(0, np.nan).min()
-    max_values = master_df[columns_to_normalize].max()
+    min_values = master_df[ columns_to_normalize ].replace( 0, np.nan ).min()
+    max_values = master_df[ columns_to_normalize ].max()
 
     print("min and max for normalization:\nmin:", min_values, "\nmax", max_values )
     # Step 4: Determine the categorical mapping for the specified categorical columns
     categorical_mapping = {}
     for column in categorical_columns:
-        categorical_mapping[column] = master_df[column].astype('category').cat.categories.tolist()
+        categorical_mapping[ column ] = master_df[ column ].astype( 'category' ).cat.categories.tolist()
 
     # Step 5: Normalize the values in specified columns across all CSVs
     for path in paths:
         csv_path = os.path.join( path, "gatesToHeatSTDfeatures.csv" )
         if os.path.isfile( csv_path ):
-            df = pd.read_csv( csv_path, index_col = 'id', dtype = { 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'int64', 'output_pins':'int64', 'logic_function':'string' } )
-            for column, categories in categorical_mapping.items():
+            df = pd.read_csv( csv_path, index_col = 'id', dtype = { 'name':'string', 'type':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'int64', 'output_pins':'int64', 'logic_function':'string' } )
+            for column, categories in categorical_mapping.items():                
                 df[ column ] = pd.Categorical( df[ column ], categories = categories ).codes
 
+            #df.loc[ df[ 'type' ] == -1, 'area'] = 0
             df[columns_to_normalize] = df[columns_to_normalize].replace(0, min_values)
             # Normalize specified columns using min-max scaling
-            df[columns_to_normalize] = (df[columns_to_normalize] - min_values) / (max_values - min_values)
+            df[columns_to_normalize] = ( df[ columns_to_normalize ] - min_values ) / ( max_values - min_values )
 
             # Step 6: Write the modified dataframe to a new CSV
             output_path = os.path.join(path, "preProcessedGatesToHeat.csv")
