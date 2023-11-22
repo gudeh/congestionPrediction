@@ -498,10 +498,7 @@ class DataSetFromYosys( DGLDataset ):
                 plt.close('all')
                 labelDone = True
                 print( "DONE drawing label heatmap!" )
-
-# sns.boxplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy())
-# stats.probplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), plot=plt)
-#sns.violinplot(data=torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), inner="quartile")            
+          
     def drawDataAnalysis(self, fileName):
         print("************* INDSIDE DRAW DATA ANALYSIS *****************", flush=True)
         if self.graphs[0].ndata.get(feat2d) is None:
@@ -549,10 +546,12 @@ class DataSetFromYosys( DGLDataset ):
 
         plt.figure(figsize=(12, 6))
         for i in range(num_features):
-            plt.subplot(num_rows, num_cols, i + 1)
-            # sns.histplot(torch.cat([feat[:, i] for feat in agg_features]).cpu().numpy(), kde=True, bins=20)
+            plt.subplot(num_rows, num_cols, i + 1)          
             agg_features_2d = [feat if len(feat.shape) == 1 else feat[:, i] for feat in agg_features]
             feature_values = torch.cat(agg_features_2d, dim=0).cpu().numpy()
+            # sns.boxplot( data = feature_values )
+            # stats.probplot( feature_values, plot=plt)
+            # sns.violinplot( data = feature_values, inner="quartile")  
             sns.histplot(feature_values, kde=True, bins=20)
             plt.xlabel(self.namesOfFeatures[i])
             plt.ylabel('Count')
@@ -562,7 +561,7 @@ class DataSetFromYosys( DGLDataset ):
         sns.histplot(torch.cat(agg_labels).cpu().numpy(), kde=True)
         plt.xlabel('Labels')
         plt.ylabel('Count')
-        plt.title('Aggregated Labels')
+        plt.title('Label')
 
         plt.suptitle('Aggregated Data Distribution for All Graphs')
         plt.tight_layout()
