@@ -44,20 +44,21 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-validFeatures = [ 'percolation', 'harmonic', 'load', 'betweenness', 'closeness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+validFeatures = [ 'betweenness', 'closeness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ] # 'percolation', 'harmonic', 'load'
 #validFeatures = [ 'betweenness', 'closeness', 'input_pins', 'output_pins' ]
 externalCentralities = [ 'closeness', 'betweenness' ]
                          
 
-mainMaxIter      = 1
-FULLTRAIN        = True
+mainMaxIter      = 5
+FULLTRAIN        = False
 DOKFOLD          = False
+FIXEDSPLIT       = True
 num_folds        = 2
 MANUALABLATION   = True
-feat2d = 'feat' 
+
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
 fullAblationCombs = [ 'area', 'input_pins', 'output_pins', 'inDegree', 'outDegree', 'type', 'eigen', 'pageRank' , 'closeness', 'betweenness' ]
-#fullAblationCombs = [ 'closeness', 'betweenness' ]
+feat2d = 'feat' 
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
@@ -66,20 +67,21 @@ dsFolderName = 'nangateV1+closeness+between'
 MIXEDTEST     = False
 dsFolderName2 = 'asap7'
 
-maxEpochs = 2
-minEpochs = 1
+maxEpochs = 250
+minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = False 
-DRAWOUTPUTS     = False
-DRAWCORRMATRIX  = True
-DRAWGRAPHDATA   = True
-DRAWHEATCENTR   = False
+DOLEARN         = True
 REMOVEFAKERAM   = True
+
+DRAWOUTPUTS     = False
+DRAWCORRMATRIX  = False
+DRAWGRAPHDATA   = False
+DRAWHEATCENTR   = False
 
 
 DEBUG           = 0 #1 for evaluation inside train
@@ -87,6 +89,13 @@ CUDA            = True
 SKIPFINALEVAL   = False #TODO True
 SELF_LOOP = True
 COLAB     = False
+
+if 'nangate' in dsFolderName:
+    dsAbbreviated  = 'NG45'
+    dsAbbreviated2 = 'A7' 
+else:
+    dsAbbreviated = 'A7'
+    dsAbbreviated2 = 'NG45' 
 
 if CUDA:
     print( "torch.cuda.is_available():", torch.cuda.is_available() )
@@ -356,7 +365,7 @@ class DataSetFromYosys( DGLDataset ):
     #     plt.clf()
     #     print( "End: drawSingleCorrelationMatrix!" )
 
-    def drawSingleCorrelationMatrix(self, fileName):
+    def drawSingleCorrelationMatrix( self, fileName ):
         print("Start: drawSingleCorrelationMatrix!")
         num_graphs = len(self.graphs)
         all_data = []
@@ -407,7 +416,7 @@ class DataSetFromYosys( DGLDataset ):
 
         print("End: drawSingleCorrelationMatrix!")
         
-    def drawHeatCentrality(self, fileName, clip_min=None, clip_max=None):
+    def drawHeatCentrality( self, fileName, clip_min=None, clip_max=None ):
         print("self.namesOfFeatures:", self.namesOfFeatures)
         for g in self.graphs:
             labelDone = False
@@ -493,13 +502,13 @@ class DataSetFromYosys( DGLDataset ):
                 cax = fig.add_axes([0.15, -0.1, 0.7, 0.03])
                 cmap = cm.RdYlGn
                 cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
-                cbar.set_label('Reference Colorbar')
-                plt.savefig(f"heatMap-{designName}-Label-"+dsFolderName)
+                cbar.set_label( 'Reference Colorbar' )
+                plt.savefig( f"heatMap-{designName}-Label-" + dsAbbreviated ) # dsFolderName )
                 plt.close('all')
                 labelDone = True
                 print( "DONE drawing label heatmap!" )
           
-    def drawDataAnalysis(self, fileName):
+    def drawDataAnalysis( self, fileName ):
         print("************* INDSIDE DRAW DATA ANALYSIS *****************", flush=True)
         if self.graphs[0].ndata.get(feat2d) is None:
             print( "g.ndata.get(feat2d) is None!" )
@@ -1344,6 +1353,7 @@ if __name__ == '__main__':
         dsPath = '/content/drive/MyDrive/tese - datasets/dataSet'
     else:
         dsPath = Path.cwd() / dsFolderName
+        # dsPath = dsPath + 
         
     for designPath in Path( dsPath ).iterdir():
 	    if designPath.is_dir() and "runs" not in str( designPath ):
@@ -1419,7 +1429,10 @@ if __name__ == '__main__':
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
         #ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
         # ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)]
-        ablationList = [tuple(validFeatures)]
+        ablationList =  [ tuple( validFeatures ) ]
+        #validFeatures.remove( 'type' )
+        
+        ablationList += [ tuple(  [item for item in validFeatures if item != 'type' ] ) ]
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
     for item in ablationList:
@@ -1436,7 +1449,7 @@ if __name__ == '__main__':
         ablationKendalls = []
         for ablationIter in ablationList:
             with open( summary, 'a' ) as f:
-                f.write( "DSfolderName: " + dsFolderName+ ",MIXEDTEST:" )
+                f.write( "mainDS: " + dsAbbreviated + ",MIXEDTEST:" )
                 if MIXEDTEST:
                     f.write( dsFolderName2 )
                 else:
@@ -1462,9 +1475,9 @@ if __name__ == '__main__':
                     'percolation': 'PR',
                     'pageRank':    'PG'
                 }
-                copied_list = [ abbreviations.get( s, s[:1].capitalize() ) for s in ablationIter ]
-                print("copied_list for ablationResult:", copied_list)
-                f.write( '|'.join( copied_list ) )
+                abbreviatedFeatures = [ abbreviations.get( s, s[:1].capitalize() ) for s in ablationIter ]
+                print("abbreviatedFeatures for ablationResult:", abbreviatedFeatures)
+                f.write( '|'.join( abbreviatedFeatures ) )
 
             print( "\n%%%%%%%%%%%%%%%%%%%%%%%%%%\nablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, "\n%%%%%%%%%%%%%%%%%%%%%%%%%%%\n", flush = True )
             ablationIter = list( ablationIter )
@@ -1488,30 +1501,31 @@ if __name__ == '__main__':
 
             theDataset = DataSetFromYosys( listDir, ablationIter )
             if DRAWCORRMATRIX:
-                theDataset.drawSingleCorrelationMatrix( '|'.join( ablationIter )+"-"+dsFolderName )
-                # theDataset.drawCorrelationPerGraph( ''.join( ablationIter )+"-"+dsFolderName )
+                theDataset.drawSingleCorrelationMatrix( '|'.join( abbreviatedFeatures )+"-"+dsAbbreviated )
+                # theDataset.drawCorrelationPerGraph( ''.join( abbreviatedFeatures )+"-"+dsAbbreviated )
             if DRAWGRAPHDATA:
-                theDataset.drawDataAnalysis(   '|'.join( ablationIter )+"-"+dsFolderName )
-                # theDataset.drawDataAnalysisPerGraph( ''.join( ablationIter )+"-"+dsFolderName )
+                theDataset.drawDataAnalysis(   '|'.join( abbreviatedFeatures )+"-"+dsAbbreviated )
+                # theDataset.drawDataAnalysisPerGraph( ''.join( abbreviatedFeatures )+"-"+dsAbbreviated )
             if DRAWHEATCENTR:
-                theDataset.drawHeatCentrality( '|'.join( ablationIter )+"-"+dsFolderName )
+                theDataset.drawHeatCentrality( '|'.join( abbreviatedFeatures )+"-"+dsAbbreviated )
                 
             if not DOLEARN:
                 # sys.exit()
                 continue
-            #TODO HOW TO IMPLEMENT THIS ??
-            # if DOKFOLD:
+
+            if FIXEDSPLIT or FULLTRAIN:
+                num_folds = 2  
             kf = KFold( n_splits = num_folds )
             for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
-            # if not DOKFOLD: # MANUAL SPLIT
-            #     fold = 0
-            #     # LASCAS comparison, same as HUAWEI
-            #     train_indices = [i for i in range(len(theDataset)) if i !=2 and i !=4] # remove swerv and bp_be_top
-            #     test_indices = [2]
+                 # LASCAS comparison, same as HUAWEI
+                 # train_indices = [i for i in range(len(theDataset)) if i !=2 and i !=4] # remove swerv and bp_be_top
+                 # test_indices = [2]
 
                 # HUAWEI's ablation, only Black_parrot
-                # train_indices = [7] 
-                # test_indices = [i for i in range(len(theDataset)) if i != 7 and i != 4 ]  #remove bp_be_top and black_parrot
+                train_indices = [7] 
+                test_indices = [ i for i in range( len( theDataset ) ) if i != 7 ]  # black_parrot, 4:remove bp_be_top
+                if FULLTRAIN:
+                    train_indices = [ i for i in range( len( theDataset ) ) ]
                 print(f"Fold {fold+1}/{num_folds}")
                 #train_indices, valid_indices = train_indices[:-len(test_indices)], train_indices[-len(test_indices):]
                         
@@ -1526,7 +1540,7 @@ if __name__ == '__main__':
                 out_size = 1 
                 print( "in_size", in_size,",  out_size", out_size, flush = True )
                 model = GAT( in_size, 256, out_size, heads=[4,4,6] ).to( device )
-                # model = GAT( in_size, 128, out_size, heads=[4,4,6]).to( device )
+                # model = GAT( in_size, 128, out_-size, heads=[4,4,6]).to( device )
                 # model = SAGE( in_feats = in_size, hid_feats = 125, out_feats  = out_size ).to( device )
 
                 print( "\n###################" )
@@ -1552,7 +1566,8 @@ if __name__ == '__main__':
                 theDataset.printDataset()
                 
                 writerName =  "-" + labelName +"-"+ str( len( train_indices ) ) +"-"+ str( len( test_indices ) )
-                writerName += "-" + '|'.join( ablationIter ) + "-" + str( mainIteration )
+                # writerName += "-" + '|'.join( ablationIter ) + "-" + str( mainIteration )
+                writerName += "-#Feat"+ str( len( ablationIter ) ) + "-" + str( mainIteration )
                 writerName += " T-"+ ';'.join( theDataset.getNames()[i] for i in test_indices )
                 finalEpoch, maxMem, avergMem = train( train_dataloader, device, model, writerName )
                 finalEpoch += 1
@@ -1593,19 +1608,21 @@ if __name__ == '__main__':
                 pearsonTrain.append( train_corrPearson.item() )
                 spearmanTrain.append( train_corrSpearman.item() )
                 with open( summary, 'a' ) as f:
-                    f.write( str( train_indices ).replace(',', '') +","+ str( test_indices ).replace(',', ';') + ","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch )+"," )
+                    f.write( '|'.join(map(str, train_indices)) + ',' + '|'.join(map(str, test_indices)) + ","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch ) )
                     f.write( ","+ "; ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( train_kendall.item() ) +","+ str( test_kendall.item() ))
                     f.write( "," + str( train_corrPearson.item() ) +","+ str( test_corrPearson.item() ) )  #+"\n")
                     f.write( "," + str( train_corrSpearman.item() ) +","+ str( test_corrSpearman.item() )  +"\n")
-
-                # del model
-                # del train_dataloader
-                # del test_dataloader
+                    
                 torch.cuda.empty_cache()
-                if FULLTRAIN and not DOKFOLD:
+                if FULLTRAIN:
                     break
                     break
-                # K fold loop end here
+                if FIXEDSPLIT or DOKFOLD:
+                    del model
+                    del train_dataloader
+                    del test_dataloader
+
+            # K fold loop end here
             if MIXEDTEST:
                 listDir2 = []	
                 dsPath2 = Path.cwd() / dsFolderName2    
@@ -1651,7 +1668,6 @@ if __name__ == '__main__':
                 test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
                 print( "super new", test_kendall2 )
 
-            #TODO averages for spearman and pearson
             with open( summary, 'a' ) as f:
                 f.write( ",,,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
                 f.write( ",,,,,,,,Median,"  + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
