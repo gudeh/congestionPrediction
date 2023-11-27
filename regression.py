@@ -44,12 +44,12 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-validFeatures = [ 'betweenness', 'closeness', 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ] # 'percolation', 'harmonic', 'load'
+validFeatures = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' , 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
 #validFeatures = [ 'betweenness', 'closeness', 'input_pins', 'output_pins' ]
-externalCentralities = [ 'closeness', 'betweenness' ]
+externalCentralities = [ 'percolation', 'harmonic', 'load', 'closeness', 'betweenness' ]
                          
 
-mainMaxIter      = 5
+mainMaxIter      = 1
 FULLTRAIN        = False
 DOKFOLD          = False
 FIXEDSPLIT       = True
@@ -62,10 +62,11 @@ feat2d = 'feat'
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-dsFolderName = 'nangateV1+closeness+between'
-#dsFolderName = 'asap7V1+closeness+between'
-MIXEDTEST     = False
-dsFolderName2 = 'asap7'
+firstDS = 'nangateV2'
+secondDS = 'asap7V2'
+LOADSECONDDS    = True
+MIXEDTEST       = False
+
 
 maxEpochs = 250
 minEpochs = 150
@@ -75,13 +76,13 @@ improvement_threshold = 0.000001
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = True
+DOLEARN         = False
 REMOVEFAKERAM   = True
 
 DRAWOUTPUTS     = False
-DRAWCORRMATRIX  = False
-DRAWGRAPHDATA   = False
+DRAWGRAPHDATA   = True # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
+
 
 
 DEBUG           = 0 #1 for evaluation inside train
@@ -90,7 +91,7 @@ SKIPFINALEVAL   = False #TODO True
 SELF_LOOP = True
 COLAB     = False
 
-if 'nangate' in dsFolderName:
+if 'nangate' in firstDS:
     dsAbbreviated  = 'NG45'
     dsAbbreviated2 = 'A7' 
 else:
@@ -158,6 +159,8 @@ def process_and_write_csvs( paths ):
     # min_values = 0 #master_df[columns_to_normalize].min()
     min_values = master_df[ columns_to_normalize ].replace( 0, np.nan ).min()
     max_values = master_df[ columns_to_normalize ].max()
+
+    master_df.loc[ master_df[ 'type' ] == '-1', labelName ] = -1
 
     print("min and max for normalization:\nmin:", min_values, "\nmax", max_values )
     # Step 4: Determine the categorical mapping for the specified categorical columns
@@ -365,7 +368,7 @@ class DataSetFromYosys( DGLDataset ):
     #     plt.clf()
     #     print( "End: drawSingleCorrelationMatrix!" )
 
-    def drawSingleCorrelationMatrix( self, fileName ):
+    def drawSingleCorrelationMatrix( self, fileName, dsName ):
         print("Start: drawSingleCorrelationMatrix!")
         num_graphs = len(self.graphs)
         all_data = []
@@ -410,18 +413,18 @@ class DataSetFromYosys( DGLDataset ):
         cbar1 = fig.colorbar(im1, ax=axes[0])
         cbar2 = fig.colorbar(im2, ax=axes[1])
 
-        plt.savefig("combined_corrMatrices-" + fileName + ".png")
+        plt.savefig("corrMatrices-" + dsName + "-" + fileName + ".png")
         plt.close('all')
         plt.clf()
 
         print("End: drawSingleCorrelationMatrix!")
         
-    def drawHeatCentrality( self, fileName, clip_min=None, clip_max=None ):
+    def drawHeatCentrality( self, fileName, dsName, clip_min=None, clip_max=None ):
         print("self.namesOfFeatures:", self.namesOfFeatures)
         for g in self.graphs:
             labelDone = False
             designName = g.name
-            print("************* INDSIDE DRAWHEAT CENTRALITY *****************")
+            print("************* INSIDE DRAWHEAT CENTRALITY *****************")
             print("Circuit:", designName)
             print("feat2d:", feat2d)
             if g.ndata.get(feat2d) is None:
@@ -480,7 +483,7 @@ class DataSetFromYosys( DGLDataset ):
             cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='vertical')
             cbar.set_label('Reference Colorbar')
             # plt.tight_layout()
-            plt.savefig(f"heatMap-{designName}-{fileName}")
+            plt.savefig(f"heatMap-{dsName}-{designName}-{featNames}")
             plt.close('all')
             for ax in axes:
                 ax.clear()
@@ -503,13 +506,13 @@ class DataSetFromYosys( DGLDataset ):
                 cmap = cm.RdYlGn
                 cbar = plt.colorbar(cm.ScalarMappable(cmap=cmap), cax=cax, orientation='horizontal')
                 cbar.set_label( 'Reference Colorbar' )
-                plt.savefig( f"heatMap-{designName}-Label-" + dsAbbreviated ) # dsFolderName )
+                plt.savefig( f"heatMap-{dsName}-{designName}-Label" ) # firstDS )
                 plt.close('all')
                 labelDone = True
                 print( "DONE drawing label heatmap!" )
           
-    def drawDataAnalysis( self, fileName ):
-        print("************* INDSIDE DRAW DATA ANALYSIS *****************", flush=True)
+    def drawDataAnalysis( self, fileName, dsName ):
+        print("************* INSIDE DRAW DATA ANALYSIS *****************", flush=True)
         if self.graphs[0].ndata.get(feat2d) is None:
             print( "g.ndata.get(feat2d) is None!" )
             return
@@ -518,13 +521,13 @@ class DataSetFromYosys( DGLDataset ):
 
         print( "self.namesOfFeatures:", self.namesOfFeatures )
         print( "agg_features[0].shape:", agg_features[0].shape )
-        print( "agg_features:", type( agg_features ), len( agg_features ), "\n", agg_features )
+        print( "agg_features:", type( agg_features ), len( agg_features ) )#, "\n", agg_features )
         min_max_data = []
         for i, feature_name in enumerate(self.namesOfFeatures):
             agg_features_2d = [feat if len(feat.shape) == 1 else feat[:, i] for feat in agg_features]
             feature_values = torch.cat(agg_features_2d, dim=0).cpu().numpy()
-            print( "agg_features_2d:", len( agg_features_2d ) )
-            print( "feature_values:", feature_values.shape )
+            #print( "agg_features_2d:", len( agg_features_2d ) )
+            #print( "feature_values:", feature_values.shape )
             min_value = min(feature_values)
             max_value = max(feature_values)
             min_max_data.append((f'Min_{feature_name}', min_value))
@@ -539,7 +542,7 @@ class DataSetFromYosys( DGLDataset ):
         total_num_nodes = sum(graph.number_of_nodes() for graph in self.graphs)
         total_num_edges = sum(graph.number_of_edges() for graph in self.graphs)
 
-        with open(f"graphLevelAnalysis_{fileName}.csv", mode='w', newline='') as csv_file:
+        with open(f"dataSet-MinAndMax-{fileName}.csv", mode='w', newline='') as csv_file:
             csv_writer = csv.writer(csv_file)
             csv_writer.writerows(min_max_data)
             csv_writer.writerow(('Total_Num_Nodes', total_num_nodes))
@@ -574,13 +577,13 @@ class DataSetFromYosys( DGLDataset ):
 
         plt.suptitle('Aggregated Data Distribution for All Graphs')
         plt.tight_layout()
-        plt.savefig("graphLevelAggregatedAnalysis-" + fileName + ".png")
+        plt.savefig("histograms-" + dsName + "-" + fileName + ".png")
         plt.close('all')
         plt.clf()
 
 #QQ PLOT WORKING
     # def drawDataAnalysis(self, fileName):
-    #     print("************* INDSIDE DRAW DATA ANALYSIS *****************", flush=True)
+    #     print("************* INSIDE DRAW DATA ANALYSIS *****************", flush=True)
     #     agg_features = [graph.ndata[feat2d] for graph in self.graphs]
     #     agg_labels = [graph.ndata[labelName] for graph in self.graphs]
     #     num_features = agg_features[0].shape[1]
@@ -971,7 +974,7 @@ def drawGraph( graph, graphName ):
 
 def drawHeat( tensorLabel, tensorPredict, drawHeatName, graph ):
     designName = graph.name
-    print( "************* INDSIDE DRAWHEAT *****************" )
+    print( "************* INSIDE DRAWHEAT *****************" )
     print( "Circuit:", designName )
     print( "label:", type( tensorLabel ), tensorLabel.shape )
     print( "predict:", type( tensorPredict ), tensorPredict.shape )
@@ -1352,8 +1355,7 @@ if __name__ == '__main__':
     if COLAB:
         dsPath = '/content/drive/MyDrive/tese - datasets/dataSet'
     else:
-        dsPath = Path.cwd() / dsFolderName
-        # dsPath = dsPath + 
+        dsPath = Path.cwd() / firstDS
         
     for designPath in Path( dsPath ).iterdir():
 	    if designPath.is_dir() and "runs" not in str( designPath ):
@@ -1377,7 +1379,15 @@ if __name__ == '__main__':
 
     process_and_write_csvs( listDir )
     #preProcessData( listDir )
-	            
+    if MIXEDTEST or DRAWGRAPHDATA:
+        secondListDir = []
+        secondDSPath = Path.cwd() / secondDS
+        for designPath in Path( secondDSPath ).iterdir():
+            if designPath.is_dir() and "runs" not in str( designPath ):
+                print("designPath:", designPath )
+                secondListDir.append( designPath )
+        process_and_write_csvs( secondListDir )
+	
     writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
     df = aggregateData( listDir, 'preProcessedGatesToHeat.csv' )
     print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
@@ -1429,9 +1439,7 @@ if __name__ == '__main__':
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
         #ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
         # ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)]
-        ablationList =  [ tuple( validFeatures ) ]
-        #validFeatures.remove( 'type' )
-        
+        ablationList =  [ tuple( validFeatures ) ]        
         ablationList += [ tuple(  [item for item in validFeatures if item != 'type' ] ) ]
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
@@ -1448,24 +1456,6 @@ if __name__ == '__main__':
         print( "--> combination_list:", len( ablationList ), ablationList )
         ablationKendalls = []
         for ablationIter in ablationList:
-            with open( summary, 'a' ) as f:
-                f.write( "mainDS: " + dsAbbreviated + ",MIXEDTEST:" )
-                if MIXEDTEST:
-                    f.write( dsFolderName2 )
-                else:
-                    f.write( "False" )
-                f.write( ",#Circuits:" + str( len( listDir ) ) )
-                f.write( ",minEpochs:" + str( minEpochs ) )
-                f.write( ",maxEpochs:" + str( maxEpochs ) )
-                f.write( ",step:" + str( round( step, 5 ) ) )
-                f.write( ",labelName:" + labelName )
-                f.write( ",features: " ) 
-                f.write( "; ".join( ablationIter ) )
-                f.write( ",FULLTRAIN: " + str( FULLTRAIN ) )
-                f.write( ",MANUALABLATION:" + str( MANUALABLATION ) )
-                f.write( ",improvement_threshold:" + str( improvement_threshold ) )
-                f.write( ",patience:" + str( patience ) )
-                f.write( "\ntrainIndices,testIndices,finalEpoch,runtime(min),MaxMemory,AverageMemory, Circuit Test, TrainKendall, TestKendall, TrainPearson, TestPearson, TrainSpearman, TestSpearman\n" )
             with open( ablationResult, 'a' ) as f:
                 abbreviations = {
                     'inDegree': 'ID',
@@ -1478,6 +1468,25 @@ if __name__ == '__main__':
                 abbreviatedFeatures = [ abbreviations.get( s, s[:1].capitalize() ) for s in ablationIter ]
                 print("abbreviatedFeatures for ablationResult:", abbreviatedFeatures)
                 f.write( '|'.join( abbreviatedFeatures ) )
+                
+            with open( summary, 'a' ) as f:
+                f.write( "mainDS: " + dsAbbreviated + ",MIXEDTEST:" )
+                if MIXEDTEST:
+                    f.write( secondDS )
+                else:
+                    f.write( "False" )
+                f.write( ",#Circuits:" + str( len( listDir ) ) )
+                f.write( ",minEpochs:" + str( minEpochs ) )
+                f.write( ",maxEpochs:" + str( maxEpochs ) )
+                f.write( ",step:" + str( round( step, 5 ) ) )
+                f.write( ",labelName:" + labelName )
+                f.write( ",features: " ) 
+                f.write( "; ".join( abbreviatedFeatures ) )
+                f.write( ",FULLTRAIN: " + str( FULLTRAIN ) )
+                f.write( ",MANUALABLATION:" + str( MANUALABLATION ) )
+                f.write( ",improvement_threshold:" + str( improvement_threshold ) )
+                f.write( ",patience:" + str( patience ) )
+                f.write( "\ntrainIndices,testIndices,finalEpoch,runtime(min),MaxMemory,AverageMemory, Circuit Test, TrainKendall, TestKendall, TrainPearson, TestPearson, TrainSpearman, TestSpearman\n" )
 
             print( "\n%%%%%%%%%%%%%%%%%%%%%%%%%%\nablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, "\n%%%%%%%%%%%%%%%%%%%%%%%%%%%\n", flush = True )
             ablationIter = list( ablationIter )
@@ -1499,15 +1508,21 @@ if __name__ == '__main__':
             spearmanTrain = []
             
 
-            theDataset = DataSetFromYosys( listDir, ablationIter )
-            if DRAWCORRMATRIX:
-                theDataset.drawSingleCorrelationMatrix( '|'.join( abbreviatedFeatures )+"-"+dsAbbreviated )
-                # theDataset.drawCorrelationPerGraph( ''.join( abbreviatedFeatures )+"-"+dsAbbreviated )
+            theDataset    = DataSetFromYosys( listDir, ablationIter )
+            if LOADSECONDDS:
+                secondDataset = DataSetFromYosys( secondListDir, ablationIter )
+                
             if DRAWGRAPHDATA:
-                theDataset.drawDataAnalysis(   '|'.join( abbreviatedFeatures )+"-"+dsAbbreviated )
-                # theDataset.drawDataAnalysisPerGraph( ''.join( abbreviatedFeatures )+"-"+dsAbbreviated )
+                theDataset.drawSingleCorrelationMatrix( '|'.join( abbreviatedFeatures ), dsAbbreviated )
+                theDataset.drawDataAnalysis(   '|'.join( abbreviatedFeatures ), dsAbbreviated )
+                if LOADSECONDDS:
+                    secondDataset.drawSingleCorrelationMatrix( '|'.join( abbreviatedFeatures ), dsAbbreviated2 )
+                    secondDataset.drawDataAnalysis(   '|'.join( abbreviatedFeatures ), dsAbbreviated2 )
+
             if DRAWHEATCENTR:
-                theDataset.drawHeatCentrality( '|'.join( abbreviatedFeatures )+"-"+dsAbbreviated )
+                theDataset.drawHeatCentrality( '|'.join( abbreviatedFeatures ), dsAbbreviated )    
+                if LOADSECONDDS:
+                    secondDataset.drawHeatCentrality( '|'.join( abbreviatedFeatures ), dsAbbreviated2 )
                 
             if not DOLEARN:
                 # sys.exit()
@@ -1586,12 +1601,12 @@ if __name__ == '__main__':
                         for n in test_indices:
                             g = theDataset[ n ].to( device )
                             path = theDataset.names[ n ]
-                            path = imageOutput + "/test-" + path +"-testIndex"+ str(test_indices)+"-e"+str(finalEpoch)+"-feat"+str(ablationIter)
+                            path = imageOutput + "/test-" + path +"-testIndex"+ str(test_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
                             evaluate_single( g, device, model, path ) #using only for drawing for now
                         for n in train_indices:
                             g = theDataset[ n ].to( device )
                             path = theDataset.names[ n ]
-                            path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(ablationIter)
+                            path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
                             evaluate_single( g, device, model, path ) #using only for drawing for now
                 else:
                     test_kendall= test_corrPearson= test_corrSpearman= train_kendall= train_corrPearson= train_corrSpearman= torch.tensor([0]) #valid_kendall= valid_corrPearson= valid_corrSpearman= 
@@ -1625,7 +1640,7 @@ if __name__ == '__main__':
             # K fold loop end here
             if MIXEDTEST:
                 listDir2 = []	
-                dsPath2 = Path.cwd() / dsFolderName2    
+                dsPath2 = Path.cwd() / secondDS    
                 for designPath in Path( dsPath2 ).iterdir():
                         if designPath.is_dir() and "runs" not in str( designPath ):
                                 print("designPath:", designPath )
@@ -1669,16 +1684,16 @@ if __name__ == '__main__':
                 print( "super new", test_kendall2 )
 
             with open( summary, 'a' ) as f:
-                f.write( ",,,,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
-                f.write( ",,,,,,,,Median,"  + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
-                f.write( ",,,,,,,,Std Dev," + ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) +","+ ( str( statistics.stdev( kendallTest ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
+                f.write( ",,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
+                f.write( ",,,,,,Median,"  + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
+                f.write( ",,,,,,Std Dev," + ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) +","+ ( str( statistics.stdev( kendallTest ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
             with open( ablationResult, 'a' ) as f:
                 f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) )
                 f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ ( str( statistics.stdev( kendallTest ) )  if len( kendallTest )  > 1 else "N/A" ) )
                 f.write( ","+ str( sum( pearsonTrain ) / len( pearsonTrain ) ) +","+ ( str( statistics.stdev( pearsonTrain ) ) if len( pearsonTrain ) > 1 else "N/A" ) )
                 f.write( ","+ str( sum( spearmanTrain ) / len( spearmanTrain ) ) +","+ ( str( statistics.stdev( spearmanTrain ) ) if len( spearmanTrain ) > 1 else "N/A" ) + "\n" )
                 
-            folder_name = f"{str(ablationIter)}-{mainIteration}"
+            folder_name = f"{str(abbreviatedFeatures)}-{mainIteration}"
             if DRAWOUTPUTS:
                 shutil.move( imageOutput, folder_name )
             del theDataset
@@ -1702,7 +1717,7 @@ if __name__ == '__main__':
         new_counter = 0
     folder_name = str(new_counter)
     os.mkdir(folder_name)
-    excluded_folders = [ "nangateV1+closeness+between", "asap7V1+closeness+between", "nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset"]
+    excluded_folders = [ "nangateV2", "asap7V2", "nangateV1+closeness+between", "asap7V1+closeness+between", "nangate", "backup", "c17", "gcd", "regression.py", ".git", "toyDataset"]
     for item in os.listdir():
         print( "item:", item )
         if not re.match( pattern, item ) and item not in excluded_folders:
