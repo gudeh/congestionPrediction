@@ -46,8 +46,8 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 
 validFeatures = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' , 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
 #validFeatures = [ 'betweenness', 'closeness', 'input_pins', 'output_pins' ]
-externalCentralities = [ 'percolation', 'harmonic', 'load', 'closeness', 'betweenness' ]
-                         
+externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' ]
+globalNormMode = 'oneZero'                         
 
 mainMaxIter      = 1
 FULLTRAIN        = False
@@ -62,14 +62,20 @@ feat2d = 'feat'
 
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
-firstDS = 'nangateV2'
-secondDS = 'asap7V2'
+
+setup = 2
+if setup == 1:
+    firstDS = 'nangateV2'
+    secondDS = 'asap7V2'
+elif setup == 2:
+    firstDS = 'asap7V2'
+    secondDS = 'nangateV2' 
 LOADSECONDDS    = True
 MIXEDTEST       = False
 
 
-maxEpochs = 250
-minEpochs = 150
+maxEpochs = 2
+minEpochs = 1
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
@@ -88,8 +94,8 @@ DRAWHEATCENTR   = False
 DEBUG           = 0 #1 for evaluation inside train
 CUDA            = True
 SKIPFINALEVAL   = False #TODO True
-SELF_LOOP = True
-COLAB     = False
+SELF_LOOP       = True
+COLAB           = False
 
 if 'nangate' in firstDS:
     dsAbbreviated  = 'NG45'
@@ -138,13 +144,12 @@ def dynamicConcatenate( featTensor, tensor2 ):
 
 
 def process_and_write_csvs( paths ):
-    categorical_columns=["type"]
-    columns_to_normalize = [ labelName, 'area', 'input_pins', 'output_pins'  ] #+ stdCellFeats
+    categorical_columns = [ "type" ]
+    pandasNormCols = [ labelName, 'area', 'input_pins', 'output_pins'  ]
     master_df = pd.DataFrame()
-    # Step 3: Read and concatenate all CSVs into the master dataframe
     for path in paths:
-        csv_path = os.path.join(path, "gatesToHeatSTDfeatures.csv")
-        if os.path.isfile(csv_path):
+        csv_path = os.path.join( path, "gatesToHeatSTDfeatures.csv")
+        if os.path.isfile( csv_path ):
             df = pd.read_csv( csv_path, index_col = 'id', dtype = { 'name':'string', 'conCount':'int64', 'routingHeat':'float64', 'area':'float64', 'input_pins':'int64', 'output_pins':'int64', 'logic_function':'string' } )
             master_df = pd.concat( [ master_df, df ], ignore_index = True )
     master_df = master_df[ master_df[ labelName ] > 0 ]
@@ -153,22 +158,20 @@ def process_and_write_csvs( paths ):
         master_df.loc[ master_df[ 'type' ] == '-1', 'area'] = 0
         master_df.loc[ master_df[ 'type' ] == '-1', 'input_pins'] = 0
         master_df.loc[ master_df[ 'type' ] == '-1', 'output_pins'] = 0
+        # master_df.loc[ master_df[ 'type' ] == '-1', labelName] = 0
     # master_df.to_csv("master_df")
     
-    # Step 2: Determine the min and max values for columns to normalize
-    # min_values = 0 #master_df[columns_to_normalize].min()
-    min_values = master_df[ columns_to_normalize ].replace( 0, np.nan ).min()
-    max_values = master_df[ columns_to_normalize ].max()
-
-    master_df.loc[ master_df[ 'type' ] == '-1', labelName ] = -1
-
+    min_values = master_df[ pandasNormCols ].replace( 0, np.nan ).min()
+    max_values = master_df[ pandasNormCols ].max()
     print("min and max for normalization:\nmin:", min_values, "\nmax", max_values )
-    # Step 4: Determine the categorical mapping for the specified categorical columns
+    
     categorical_mapping = {}
     for column in categorical_columns:
         categorical_mapping[ column ] = master_df[ column ].astype( 'category' ).cat.categories.tolist()
+    # print( "categorical_mapping:\n" )#, categorical_mapping )
+    # for key, value in categorical_mapping.items():
+    #     print(f'{key}: {value}')
 
-    # Step 5: Normalize the values in specified columns across all CSVs
     for path in paths:
         csv_path = os.path.join( path, "gatesToHeatSTDfeatures.csv" )
         if os.path.isfile( csv_path ):
@@ -176,13 +179,19 @@ def process_and_write_csvs( paths ):
             for column, categories in categorical_mapping.items():                
                 df[ column ] = pd.Categorical( df[ column ], categories = categories ).codes
 
-            #df.loc[ df[ 'type' ] == -1, 'area'] = 0
-            df[columns_to_normalize] = df[columns_to_normalize].replace(0, min_values)
-            # Normalize specified columns using min-max scaling
-            df[columns_to_normalize] = ( df[ columns_to_normalize ] - min_values ) / ( max_values - min_values )
+            # TODO check if this is ok
+            df[ pandasNormCols ] = df[ pandasNormCols ].replace( 0, min_values )
+            if globalNormMode == 'oneZero':
+                df[ pandasNormCols ] = ( df[ pandasNormCols ] - min_values ) / ( max_values - min_values )
+            if globalNormMode == 'meanStd':
+                mean_values = df[ pandasNormCols ].mean()
+                std_values =  df[ pandasNormCols ].std()
+                df[ pandasNormCols ] = ( df[ pandasNormCols ] - mean_values) / std_values
+                
+            
+            df.loc[ df[ 'type' ] == -1, labelName] = -1
 
-            # Step 6: Write the modified dataframe to a new CSV
-            output_path = os.path.join(path, "preProcessedGatesToHeat.csv")
+            output_path = os.path.join( path, "preProcessedGatesToHeat.csv" )
             df.to_csv(output_path, index=True)
 
 
@@ -657,6 +666,19 @@ class DataSetFromYosys( DGLDataset ):
 	        graph = self._process_single( path )
 	        self.graphs.append( graph )
 
+    def normalize_scores( self, scores_list, mode = 'oneZero' ):
+        if mode == 'oneZero':
+            min_score = min( scores_list )
+            max_score = max( scores_list )
+            normalized_scores = [(score - min_score) / (max_score - min_score) for score in scores_list]
+        if mode == 'meanStd':
+            mean_value = np.mean(data_list)
+            std_dev = np.std(data_list)
+            normalized_data = [ ( value - mean_value ) / std_dev for value in data_list]
+        if mode == 'log':
+            normalized_data = [ np.log(value + 1e-10) for value in data_list]
+        return normalized_scores
+                
     def _process_single( self, designPath ):
         print( "\n\n########## PROCESS SINGLE #################" )
         print( "      Circuit:", str( designPath ).rsplit( '/' )[-1] )
@@ -749,84 +771,23 @@ class DataSetFromYosys( DGLDataset ):
         self.graph.remove_nodes( isolated_nodes )
         print( "\n---> AFTER REMOVED NODES:" )
         print( "\tself.graph.nodes()", self.graph.nodes().shape ) #, "\n", self.graph.nodes() )    
-    ################### CLOSENESS  ################################################
-        # #drawGraph( self.graph, self.graph.name )
-        # if 'closeness' in self.ablationFeatures:
-        #     print( "calculating closeness!" )
-        #     aux_graph = self.graph.to_networkx()
-        #     nx_graph  = nx.Graph( aux_graph )
-        #     print( "nx_graph:\n", nx_graph, flush = True )
-        #     # print( ".nodes:\n", nx_graph.nodes(data=True))
-        #     # print( ".edges:\n", nx_graph.edges(data=True))
-        #     close_scores = nx.closeness_centrality( nx_graph )
-        #     # close_scores = nx.incremental_closeness_centrality( nx_graph )
-        #     close_scores_list = list( close_scores.values() )
-        #     min_score = min( close_scores_list )
-        #     max_score = max( close_scores_list )
-        #     normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in close_scores_list ] 
-        #     close_tensor = torch.tensor( normalized_scores )
-        #     self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, close_tensor )
-        #     if 'Closeness' not in self.namesOfFeatures:
-        #         self.namesOfFeatures.append( 'Closeness' )
     ################### EIGENVECTOR  ################################################
         if 'eigen' in self.ablationFeatures:
             print( "calculating eigenvector!" )
             aux_graph = self.graph.to_networkx()
             nx_graph  = nx.Graph( aux_graph )
             eigen_scores = nx.eigenvector_centrality_numpy( nx_graph, max_iter = 5000 )
-            eigen_scores_list = list( eigen_scores.values() )
-            min_score = min( eigen_scores_list )
-            max_score = max( eigen_scores_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in eigen_scores_list ] 
-            eigen_tensor = torch.tensor( normalized_scores )
+            eigen_scores_list = list( eigen_scores.values() )            
+            eigen_tensor = torch.tensor( self.normalize_scores( eigen_scores_list, globalNormMode ) )
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, eigen_tensor )
             if 'Eigen' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'Eigen' )
-    ################### GROUP BETWEENNESS  ################################################
-        # #drawGraph( self.graph, self.graph.name )
-        # if 'betweenness' in self.ablationFeatures:
-        #     print( "calculating group betweenness!" )
-        #     aux_graph = self.graph.to_networkx()
-        #     nx_graph  = nx.Graph( aux_graph )
-        #     print( "nx_graph:\n", nx_graph, flush = True )
-        #     # print( ".nodes:\n", nx_graph.nodes(data=True))
-        #     # print( ".edges:\n", nx_graph.edges(data=True))
-
-        #     group_betweenness = {}
-        #     group_distance = 3
-        #     for node in nx_graph.nodes():
-        #         print( "node", node, flush = True )
-        #         subgraph = nx.ego_graph( nx_graph, node, radius = group_distance )
-        #         # group_betweenness[node] = nx.group_betweenness_centrality( nx_graph, subgraph )
-        #         if nx.is_connected( subgraph ) and len( subgraph ) > 2:
-        #             group_betweenness[node] = nx.group_betweenness_centrality(nx_graph, subgraph)
-        #         else:
-        #             group_betweenness[node] = {}
-
-        #     for node, centrality in group_betweenness.items():
-        #         print(f"Node {node}:")
-        #         if isinstance(centrality, float):
-        #             print(f"  Group: {centrality}")
-        #         else:
-        #             for group, centrality_score in centrality.items():
-        #                 print(f"  Group {group}: {centrality_score}")
-        #     group_betweenness_list = list( group_betweenness.values() )
-        #     min_score = min( group_betweenness_list )
-        #     max_score = max( group_betweenness_list )
-        #     normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in group_betweenness_list ] 
-        #     between_tensor = torch.tensor( normalized_scores )
-        #     self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, between_tensor )
-        #     if 'Betweenness' not in self.namesOfFeatures:
-        #         self.namesOfFeatures.append( 'Betweenness' )
     ################### PAGE RANK ################################################    
         if 'pageRank' in self.ablationFeatures:
             nx_graph = self.graph.to_networkx()
             pagerank_scores = nx.pagerank(nx_graph)
             pagerank_scores_list = list( pagerank_scores.values() )
-            min_score = min( pagerank_scores_list )
-            max_score = max( pagerank_scores_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in pagerank_scores_list ] 
-            pagerank_tensor = torch.tensor( normalized_scores )
+            pagerank_tensor = torch.tensor( self.normalize_scores( pagerank_scores_list , globalNormMode ) )
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, pagerank_tensor )
             if 'pageRank' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'pageRank' )
@@ -835,10 +796,7 @@ class DataSetFromYosys( DGLDataset ):
             nx_graph = self.graph.to_networkx()
             inDegree_scores = nx.in_degree_centrality(nx_graph)
             inDegree_scores_list = list( inDegree_scores.values() )
-            min_score = min( inDegree_scores_list )
-            max_score = max( inDegree_scores_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in inDegree_scores_list ] 
-            inDegree_tensor = torch.tensor( normalized_scores )
+            inDegree_tensor = torch.tensor( self.normalize_scores( inDegree_scores_list, globalNormMode ) )
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, inDegree_tensor )
             if 'inDegree' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'inDegree' )
@@ -847,14 +805,16 @@ class DataSetFromYosys( DGLDataset ):
             nx_graph = self.graph.to_networkx()
             outDegree_scores = nx.out_degree_centrality(nx_graph)
             outDegree_scores_list = list( outDegree_scores.values() )
-            min_score = min( outDegree_scores_list )
-            max_score = max( outDegree_scores_list )
-            normalized_scores = [ ( score - min_score ) / ( max_score - min_score ) for score in outDegree_scores_list ] 
-            outDegree_tensor = torch.tensor( normalized_scores )
+            outDegree_tensor = torch.tensor( self.normalize_scores( outDegree_scores_list, globalNormMode ) )
             self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, outDegree_tensor )
             if 'outDegree' not in self.namesOfFeatures:
                 self.namesOfFeatures.append( 'outDegree' )
-##################################################################################                
+##################################################################################
+        # meanStdNorm = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' , 'eigen', 'pageRank', 'inDegree', 'outDegree' ]
+        # mean_values = self.graph.ndata[ meanStdNorm ].mean()
+        # std_values = self.graph.ndata[ meanStdNorm ].std()
+        # self.graph.ndata[ meanStdNorm ] = ( self.graph.ndata[ meanStdNorm ] - mean_values) / std_values
+        
         if SELF_LOOP:
             self.graph = dgl.add_self_loop( self.graph )           
         print( "self.ablationFeatures (_process_single):", type( self.ablationFeatures ), len( self.ablationFeatures ), self.ablationFeatures )
@@ -1439,8 +1399,11 @@ if __name__ == '__main__':
         # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
         #ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
         # ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)]
-        ablationList =  [ tuple( validFeatures ) ]        
-        ablationList += [ tuple(  [item for item in validFeatures if item != 'type' ] ) ]
+        # ablationList =  [ tuple( validFeatures ) ] 
+        ablationList = [ tuple(  [item for item in validFeatures if item != 'type' ] ) ]
+
+        
+
     print( "MANUALABLATION:", MANUALABLATION )
     print( "ablationList:", len( ablationList ), ablationList )
     for item in ablationList:
@@ -1481,7 +1444,7 @@ if __name__ == '__main__':
                 f.write( ",step:" + str( round( step, 5 ) ) )
                 f.write( ",labelName:" + labelName )
                 f.write( ",features: " ) 
-                f.write( "; ".join( abbreviatedFeatures ) )
+                f.write( "| ".join( abbreviatedFeatures ) )
                 f.write( ",FULLTRAIN: " + str( FULLTRAIN ) )
                 f.write( ",MANUALABLATION:" + str( MANUALABLATION ) )
                 f.write( ",improvement_threshold:" + str( improvement_threshold ) )
@@ -1583,7 +1546,7 @@ if __name__ == '__main__':
                 writerName =  "-" + labelName +"-"+ str( len( train_indices ) ) +"-"+ str( len( test_indices ) )
                 # writerName += "-" + '|'.join( ablationIter ) + "-" + str( mainIteration )
                 writerName += "-#Feat"+ str( len( ablationIter ) ) + "-" + str( mainIteration )
-                writerName += " T-"+ ';'.join( theDataset.getNames()[i] for i in test_indices )
+                writerName += " T-"+ ';'.join( theDataset.getNames()[i][:6] for i in test_indices )
                 finalEpoch, maxMem, avergMem = train( train_dataloader, device, model, writerName )
                 finalEpoch += 1
 
@@ -1603,11 +1566,11 @@ if __name__ == '__main__':
                             path = theDataset.names[ n ]
                             path = imageOutput + "/test-" + path +"-testIndex"+ str(test_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
                             evaluate_single( g, device, model, path ) #using only for drawing for now
-                        for n in train_indices:
-                            g = theDataset[ n ].to( device )
-                            path = theDataset.names[ n ]
-                            path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
-                            evaluate_single( g, device, model, path ) #using only for drawing for now
+                        # for n in train_indices:
+                        #     g = theDataset[ n ].to( device )
+                        #     path = theDataset.names[ n ]
+                        #     path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
+                        #     evaluate_single( g, device, model, path ) #using only for drawing for now
                 else:
                     test_kendall= test_corrPearson= test_corrSpearman= train_kendall= train_corrPearson= train_corrSpearman= torch.tensor([0]) #valid_kendall= valid_corrPearson= valid_corrSpearman= 
 
@@ -1624,9 +1587,9 @@ if __name__ == '__main__':
                 spearmanTrain.append( train_corrSpearman.item() )
                 with open( summary, 'a' ) as f:
                     f.write( '|'.join(map(str, train_indices)) + ',' + '|'.join(map(str, test_indices)) + ","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch ) )
-                    f.write( ","+ "; ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( train_kendall.item() ) +","+ str( test_kendall.item() ))
-                    f.write( "," + str( train_corrPearson.item() ) +","+ str( test_corrPearson.item() ) )  #+"\n")
-                    f.write( "," + str( train_corrSpearman.item() ) +","+ str( test_corrSpearman.item() )  +"\n")
+                    f.write( ","+ "| ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( round( train_kendall.item(), 3) ) +","+ str( round( test_kendall.item(), 3 ) ))
+                    f.write( "," + str( round(  train_corrPearson.item(), 3 ) ) +","+ str( round(  test_corrPearson.item(), 3 ) ) )
+                    f.write( "," + str( round( train_corrSpearman.item(), 3 ) ) +","+ str( round( test_corrSpearman.item(), 3 ) )  +"\n" )
                     
                 torch.cuda.empty_cache()
                 if FULLTRAIN:
@@ -1636,6 +1599,8 @@ if __name__ == '__main__':
                     del model
                     del train_dataloader
                     del test_dataloader
+                if FIXEDSPLIT:
+                    break
 
             # K fold loop end here
             if MIXEDTEST:
@@ -1684,9 +1649,9 @@ if __name__ == '__main__':
                 print( "super new", test_kendall2 )
 
             with open( summary, 'a' ) as f:
-                f.write( ",,,,,,Average," + str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
-                f.write( ",,,,,,Median,"  + str( statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
-                f.write( ",,,,,,Std Dev," + ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) +","+ ( str( statistics.stdev( kendallTest ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
+                f.write( ",,,,,,Average," + str(   round( sum( kendallTrain ) / len( kendallTrain ), 3 ) ) +","+ str( round( sum( kendallTest ) / len( kendallTest ), 3 ) ) + "\n" )
+                f.write( ",,,,,,Median,"  + str(   round( statistics.median( kendallTrain ), 3 ) ) +","+ str( round( statistics.median( kendallTest ), 3 ) ) +"\n" )
+                f.write( ",,,,,,Std Dev," + ( str( round( statistics.stdev ( kendallTrain ), 3 ) ) if len( kendallTrain ) > 1 else "N/A" ) +","+ ( str( round( statistics.stdev( kendallTest ), 3 ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
             with open( ablationResult, 'a' ) as f:
                 f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) )
                 f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ ( str( statistics.stdev( kendallTest ) )  if len( kendallTest )  > 1 else "N/A" ) )
