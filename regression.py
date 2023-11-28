@@ -29,7 +29,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter #Graphical visualization
+from torch.utils.tensorboard import   SummaryWriter #Graphical visualization
 from torch.utils.data import DataLoader, RandomSampler
 
 import dgl
@@ -47,12 +47,12 @@ from torchmetrics.regression import KendallRankCorrCoef #Same score as congestio
 validFeatures = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' , 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
 #validFeatures = [ 'betweenness', 'closeness', 'input_pins', 'output_pins' ]
 externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' ]
-globalNormMode = 'oneZero'                         
+globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
 
 mainMaxIter      = 1
-FULLTRAIN        = False
+FULLTRAIN        = True
 DOKFOLD          = False
-FIXEDSPLIT       = True
+FIXEDSPLIT       = False
 num_folds        = 2
 MANUALABLATION   = True
 
@@ -71,18 +71,18 @@ elif setup == 2:
     firstDS = 'asap7V2'
     secondDS = 'nangateV2' 
 LOADSECONDDS    = True
-MIXEDTEST       = False
+MIXEDTEST       = True
 
 
-maxEpochs = 2
-minEpochs = 1
+maxEpochs = 250
+minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
 patience = 35  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
-DOLEARN         = False
+DOLEARN         = True
 REMOVEFAKERAM   = True
 
 DRAWOUTPUTS     = False
@@ -573,13 +573,13 @@ class DataSetFromYosys( DGLDataset ):
             # sns.boxplot( data = feature_values )
             # stats.probplot( feature_values, plot=plt)
             # sns.violinplot( data = feature_values, inner="quartile")  
-            sns.histplot(feature_values, kde=True, bins=20)
+            sns.histplot(feature_values, kde=False, bins=20)
             plt.xlabel(self.namesOfFeatures[i])
             plt.ylabel('Count')
             plt.title(self.namesOfFeatures[i])
 
         plt.subplot(num_rows, num_cols, num_plots)  # Label in a separate subplot
-        sns.histplot(torch.cat(agg_labels).cpu().numpy(), kde=True)
+        sns.histplot(torch.cat(agg_labels).cpu().numpy(), kde=False)
         plt.xlabel('Labels')
         plt.ylabel('Count')
         plt.title('Label')
@@ -670,14 +670,14 @@ class DataSetFromYosys( DGLDataset ):
         if mode == 'oneZero':
             min_score = min( scores_list )
             max_score = max( scores_list )
-            normalized_scores = [(score - min_score) / (max_score - min_score) for score in scores_list]
+            normalized_data = [(score - min_score) / (max_score - min_score) for score in scores_list ]
         if mode == 'meanStd':
-            mean_value = np.mean(data_list)
-            std_dev = np.std(data_list)
-            normalized_data = [ ( value - mean_value ) / std_dev for value in data_list]
+            mean_value = np.mean( scores_list ) 
+            std_dev = np.std( scores_list )
+            normalized_data = [ ( value - mean_value ) / std_dev for value in scores_list ]
         if mode == 'log':
-            normalized_data = [ np.log(value + 1e-10) for value in data_list]
-        return normalized_scores
+            normalized_data = [ np.log(value + 1e-10 ) for value in scores_list ]
+        return normalized_data
                 
     def _process_single( self, designPath ):
         print( "\n\n########## PROCESS SINGLE #################" )
@@ -1500,8 +1500,8 @@ if __name__ == '__main__':
                  # test_indices = [2]
 
                 # HUAWEI's ablation, only Black_parrot
-                train_indices = [7] 
-                test_indices = [ i for i in range( len( theDataset ) ) if i != 7 ]  # black_parrot, 4:remove bp_be_top
+                # train_indices = [7] 
+                # test_indices = [ i for i in range( len( theDataset ) ) if i != 7 ]  # black_parrot, 4:remove bp_be_top
                 if FULLTRAIN:
                     train_indices = [ i for i in range( len( theDataset ) ) ]
                 print(f"Fold {fold+1}/{num_folds}")
@@ -1566,11 +1566,11 @@ if __name__ == '__main__':
                             path = theDataset.names[ n ]
                             path = imageOutput + "/test-" + path +"-testIndex"+ str(test_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
                             evaluate_single( g, device, model, path ) #using only for drawing for now
-                        # for n in train_indices:
-                        #     g = theDataset[ n ].to( device )
-                        #     path = theDataset.names[ n ]
-                        #     path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
-                        #     evaluate_single( g, device, model, path ) #using only for drawing for now
+                        for n in train_indices:
+                            g = theDataset[ n ].to( device )
+                            path = theDataset.names[ n ]
+                            path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
+                            evaluate_single( g, device, model, path ) #using only for drawing for now
                 else:
                     test_kendall= test_corrPearson= test_corrSpearman= train_kendall= train_corrPearson= train_corrSpearman= torch.tensor([0]) #valid_kendall= valid_corrPearson= valid_corrSpearman= 
 
@@ -1595,7 +1595,7 @@ if __name__ == '__main__':
                 if FULLTRAIN:
                     break
                     break
-                if FIXEDSPLIT or DOKFOLD:
+                if DOKFOLD:
                     del model
                     del train_dataloader
                     del test_dataloader
@@ -1603,50 +1603,21 @@ if __name__ == '__main__':
                     break
 
             # K fold loop end here
-            if MIXEDTEST:
-                listDir2 = []	
-                dsPath2 = Path.cwd() / secondDS    
-                for designPath in Path( dsPath2 ).iterdir():
-                        if designPath.is_dir() and "runs" not in str( designPath ):
-                                print("designPath:", designPath )
-                                listDir2.append( designPath )
-
+            if MIXEDTEST and LOADSECONDDS:
                 ##################################################################################
-                ############################# Pre Processing #####################################
+                ######################### MIXED TECHNOLOGY TESTING ###############################
                 ##################################################################################
-                writeDFrameData( listDir2, 'gatesToHeatSTDfeatures.csv', "DSinfoBeforePreProcess.csv" )
-                df = aggregateData( listDir2, 'gatesToHeatSTDfeatures.csv' )
-                print( "\n\n#######################\n## BEFORE PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
-                for col in df:
-                    print( "describe:\n", df[ col ].describe() )
-                df.to_csv( "aggregatedDFBefore.csv" )
-                df = df.drop( df.index[ df[ labelName ] < 0 ] )
-                df.hist( bins = 50, figsize = (15,12) )
-                # plt.savefig( "BeforePreProcess-" )
-                # plt.close( 'all' )
-                # plt.clf()
-
-                preProcessData( listDir2 )
-
-                writeDFrameData( listDir2, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
-                df = aggregateData( listDir2, 'preProcessedGatesToHeat.csv' )
-                print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
-                for col in df:
-                        print( "\n####describe:\n", df[ col ].describe() )
-                df.to_csv( "aggregatedDFAfter.csv" )
-                df = df.drop( df.index[ df[ labelName ] < 0 ])
-                df = df.drop( df.index[ df[ 'type' ] < 0 ] )
-                # df = df.drop( df.index[ df[ rawFeatName ] < 0 ] )
-                df.hist( bins = 50, figsize = (15,12) )
-                # plt.savefig( "AfterPreProcess-train+valid+test" )
-                # plt.close( 'all' )
-                # plt.clf()
-                theDataset2 = DataSetFromYosys( listDir2, ablationIter )#, mode='train' )
-                test_indices2 = [i for i in range(len(theDataset)) ]# if i !=2 and i !=4] # remove swerv and bp_be_top
+                test_indices2 = [ i for i in range( len( secondDataset ) ) ]# if i !=2 and i !=4] # remove swerv and bp_be_top
                 # test_indices2 = [2]
-                test_dataloader2  = GraphDataLoader( torch.utils.data.dataset.Subset( theDataset2, test_indices2  ), batch_size = 1 )
+                test_dataloader2  = GraphDataLoader( secondDataset, batch_size = 1 )
                 test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
-                print( "super new", test_kendall2 )
+                with open( summary, 'a' ) as f:
+                    f.write( ",,,,mixed test,"+ dsAbbreviated2 )
+                    f.write( '|'.join( map( str, test_indices2 ) ) + ',,,,,' )
+                    f.write( ","+ "| ".join( secondDataset.getNames()[i] for i in test_indices2 ) +",,"+ str( round( test_kendall2.item(), 3 ) ))
+                    f.write( ",,"+ str( round(  test_corrPearson2.item(), 3 ) ) )
+                    f.write( ",,"+ str( round( test_corrSpearman2.item(), 3 ) )  +"\n" )
+                print( "mixed test kendall ", dsAbbreviated2, test_kendall2 )
 
             with open( summary, 'a' ) as f:
                 f.write( ",,,,,,Average," + str(   round( sum( kendallTrain ) / len( kendallTrain ), 3 ) ) +","+ str( round( sum( kendallTest ) / len( kendallTest ), 3 ) ) + "\n" )
