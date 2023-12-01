@@ -44,7 +44,7 @@ from sklearn.metrics import r2_score, f1_score #Score metric
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
-validFeatures = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' , 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ]
+validFeatures = [ 'closeness',  'betweenness' , 'eigen', 'pageRank', 'inDegree', 'outDegree', 'type', 'area', 'input_pins', 'output_pins' ] # , 'harmonic',, 'load',  'percolation'
 #validFeatures = [ 'betweenness', 'closeness', 'input_pins', 'output_pins' ]
 externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' ]
 globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
@@ -63,7 +63,7 @@ feat2d = 'feat'
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-setup = 2
+setup = 1
 if setup == 1:
     firstDS = 'nangateV2'
     secondDS = 'asap7V2'
@@ -74,7 +74,7 @@ LOADSECONDDS    = True
 MIXEDTEST       = True
 
 
-maxEpochs = 250
+maxEpochs = 300
 minEpochs = 150
 useEarlyStop = True
 step      = 0.005
@@ -85,7 +85,7 @@ accumulation_steps = 4
 DOLEARN         = True
 REMOVEFAKERAM   = True
 
-DRAWOUTPUTS     = False
+DRAWOUTPUTS     = True
 DRAWGRAPHDATA   = True # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
@@ -378,12 +378,12 @@ class DataSetFromYosys( DGLDataset ):
     #     print( "End: drawSingleCorrelationMatrix!" )
 
     def drawSingleCorrelationMatrix( self, fileName, dsName ):
-        print("Start: drawSingleCorrelationMatrix!")
+        print("**********Start: drawSingleCorrelationMatrix!**********")
         num_graphs = len(self.graphs)
         all_data = []
 
         for graph in self.graphs:
-            print("graph.ndata:", graph.ndata)
+            #print("graph.ndata:", graph.ndata)
             tensor = graph.ndata[feat2d]
             reshape = graph.ndata[labelName].view(-1, 1)
             tensor = torch.cat((tensor, reshape), 1)
@@ -426,7 +426,7 @@ class DataSetFromYosys( DGLDataset ):
         plt.close('all')
         plt.clf()
 
-        print("End: drawSingleCorrelationMatrix!")
+        print("************End: drawSingleCorrelationMatrix!*********")
         
     def drawHeatCentrality( self, fileName, dsName, clip_min=None, clip_max=None ):
         print("self.namesOfFeatures:", self.namesOfFeatures)
@@ -1169,8 +1169,8 @@ def evaluate_in_batches( dataloader, device, model, image_path = "" ):
     for batch_id, batched_graph in enumerate( dataloader ):
         print( "batch_id (eval_in_batches):", batch_id )
         batched_graph = batched_graph.to( device )
-        print( "batched_graph:", type( batched_graph ), batched_graph )
-        print( "theDataset[ batch_id ]:", theDataset[ batch_id ] )
+        print( "batched_graph:", type( batched_graph ) )#, batched_graph )
+        #print( "theDataset[ batch_id ]:", theDataset[ batch_id ] )
         features = batched_graph.ndata[ feat2d ].float().to( device )
         labels   = batched_graph.ndata[ labelName ].to( device )
         
@@ -1401,6 +1401,9 @@ if __name__ == '__main__':
         # ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)]
         # ablationList =  [ tuple( validFeatures ) ] 
         ablationList = [ tuple(  [item for item in validFeatures if item != 'type' ] ) ]
+        ablationList += [ ( 'closeness', 'eigen' , 'outDegree')  ] # A7 only, best corr with label
+        ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree')  ] # NG45 only, best corr with label
+        ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'input_pins', 'output_pins')  ] # NG45 only, best corr with label
 
         
 
@@ -1504,6 +1507,7 @@ if __name__ == '__main__':
                 # test_indices = [ i for i in range( len( theDataset ) ) if i != 7 ]  # black_parrot, 4:remove bp_be_top
                 if FULLTRAIN:
                     train_indices = [ i for i in range( len( theDataset ) ) ]
+                    test_indices = []
                 print(f"Fold {fold+1}/{num_folds}")
                 #train_indices, valid_indices = train_indices[:-len(test_indices)], train_indices[-len(test_indices):]
                         
@@ -1603,22 +1607,6 @@ if __name__ == '__main__':
                     break
 
             # K fold loop end here
-            if MIXEDTEST and LOADSECONDDS:
-                ##################################################################################
-                ######################### MIXED TECHNOLOGY TESTING ###############################
-                ##################################################################################
-                test_indices2 = [ i for i in range( len( secondDataset ) ) ]# if i !=2 and i !=4] # remove swerv and bp_be_top
-                # test_indices2 = [2]
-                test_dataloader2  = GraphDataLoader( secondDataset, batch_size = 1 )
-                test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
-                with open( summary, 'a' ) as f:
-                    f.write( ",,,,mixed test,"+ dsAbbreviated2 )
-                    f.write( '|'.join( map( str, test_indices2 ) ) + ',,,,,' )
-                    f.write( ","+ "| ".join( secondDataset.getNames()[i] for i in test_indices2 ) +",,"+ str( round( test_kendall2.item(), 3 ) ))
-                    f.write( ",,"+ str( round(  test_corrPearson2.item(), 3 ) ) )
-                    f.write( ",,"+ str( round( test_corrSpearman2.item(), 3 ) )  +"\n" )
-                print( "mixed test kendall ", dsAbbreviated2, test_kendall2 )
-
             with open( summary, 'a' ) as f:
                 f.write( ",,,,,,Average," + str(   round( sum( kendallTrain ) / len( kendallTrain ), 3 ) ) +","+ str( round( sum( kendallTest ) / len( kendallTest ), 3 ) ) + "\n" )
                 f.write( ",,,,,,Median,"  + str(   round( statistics.median( kendallTrain ), 3 ) ) +","+ str( round( statistics.median( kendallTest ), 3 ) ) +"\n" )
@@ -1628,6 +1616,31 @@ if __name__ == '__main__':
                 f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ ( str( statistics.stdev( kendallTest ) )  if len( kendallTest )  > 1 else "N/A" ) )
                 f.write( ","+ str( sum( pearsonTrain ) / len( pearsonTrain ) ) +","+ ( str( statistics.stdev( pearsonTrain ) ) if len( pearsonTrain ) > 1 else "N/A" ) )
                 f.write( ","+ str( sum( spearmanTrain ) / len( spearmanTrain ) ) +","+ ( str( statistics.stdev( spearmanTrain ) ) if len( spearmanTrain ) > 1 else "N/A" ) + "\n" )
+            if MIXEDTEST and LOADSECONDDS:
+                ##################################################################################
+                ######################### MIXED TECHNOLOGY TESTING ###############################
+                ##################################################################################
+                print( '######################\n###### MIXED TEST ######\n######################\n', flush = True )
+                startTimeMixedTest = time.time()
+                test_indices2 = [ i for i in range( len( secondDataset ) ) ]# if i !=2 and i !=4] # remove swerv and bp_be_top
+                # test_indices2 = [2]
+                test_dataloader2  = GraphDataLoader( secondDataset, batch_size = 1 )
+                test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
+                endTimeMixedTest = round( ( time.time() - startTimeMixedTest ) / 3600, 2 )
+                with open( summary, 'a' ) as f:
+                    f.write( "mixed test:"+ dsAbbreviated2 +"," )
+                    f.write( '|'.join( map( str, test_indices2 ) ) + ',' )
+                    f.write( ","+ str( endTimeMixedTest )+","+ "| ".join( secondDataset.getNames()[i] for i in test_indices2 ) +",,,"+ str( round( test_kendall2.item(), 3 ) ))
+                    f.write( ",,"+ str( round(  test_corrPearson2.item(), 3 ) ) )
+                    f.write( ",,"+ str( round( test_corrSpearman2.item(), 3 ) )  +"\n" )
+                print( "mixed test kendall ", dsAbbreviated2, test_kendall2 )
+                print( "time mixed test:", endTimeMixedTest )
+                if DRAWOUTPUTS:
+                    for n in test_indices2:
+                        g = secondDataset[ n ].to( device )
+                        path = secondDataset.names[ n ]
+                        path = imageOutput + "/mixedTest-" + path +"-idx"+ str(test_indices2)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
+                        evaluate_single( g, device, model, path ) #using only for drawing for now
                 
             folder_name = f"{str(abbreviatedFeatures)}-{mainIteration}"
             if DRAWOUTPUTS:
@@ -1640,7 +1653,7 @@ if __name__ == '__main__':
     
     endTimeAll = round( ( time.time() - startTimeAll ) / 3600, 2 )
     with open( summary, 'a' ) as f:
-        f.write( ",,,featCombinations:"+ str( len( ablationList ) )+"," + str( endTimeAll ) + " hours" ) 
+        f.write( ",,featCombinations:"+ str( len( ablationList ) )+"," + str( endTimeAll ) + " hours" ) 
     print("\n\n All finished, runtime:", endTimeAll, "hours" )
 
     folders = [folder for folder in os.listdir() if os.path.isdir(folder)]
