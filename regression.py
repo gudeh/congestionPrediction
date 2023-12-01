@@ -63,7 +63,7 @@ feat2d = 'feat'
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-setup = 1
+setup = 2
 if setup == 1:
     firstDS = 'nangateV2'
     secondDS = 'asap7V2'
@@ -1436,7 +1436,7 @@ if __name__ == '__main__':
                 f.write( '|'.join( abbreviatedFeatures ) )
                 
             with open( summary, 'a' ) as f:
-                f.write( "mainDS: " + dsAbbreviated + ",MIXEDTEST:" )
+                f.write( "trainDS: " + dsAbbreviated + ",MIXEDTEST:" )
                 if MIXEDTEST:
                     f.write( secondDS )
                 else:
@@ -1623,14 +1623,13 @@ if __name__ == '__main__':
                 print( '######################\n###### MIXED TEST ######\n######################\n', flush = True )
                 startTimeMixedTest = time.time()
                 test_indices2 = [ i for i in range( len( secondDataset ) ) ]# if i !=2 and i !=4] # remove swerv and bp_be_top
-                # test_indices2 = [2]
                 test_dataloader2  = GraphDataLoader( secondDataset, batch_size = 1 )
                 test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
                 endTimeMixedTest = round( ( time.time() - startTimeMixedTest ) / 3600, 2 )
                 with open( summary, 'a' ) as f:
                     f.write( "mixed test:"+ dsAbbreviated2 +"," )
                     f.write( '|'.join( map( str, test_indices2 ) ) + ',' )
-                    f.write( ","+ str( endTimeMixedTest )+","+ "| ".join( secondDataset.getNames()[i] for i in test_indices2 ) +",,,"+ str( round( test_kendall2.item(), 3 ) ))
+                    f.write( ","+ str( endTimeMixedTest )+","+ "| ".join( secondDataset.getNames()[i] for i in test_indices2 ) +",,,mixedTest,"+ str( round( test_kendall2.item(), 3 ) ))
                     f.write( ",,"+ str( round(  test_corrPearson2.item(), 3 ) ) )
                     f.write( ",,"+ str( round( test_corrSpearman2.item(), 3 ) )  +"\n" )
                 print( "mixed test kendall ", dsAbbreviated2, test_kendall2 )
