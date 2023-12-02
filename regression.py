@@ -49,11 +49,11 @@ validFeatures = [ 'closeness',  'betweenness' , 'eigen', 'pageRank', 'inDegree',
 externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' ]
 globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
 
-mainMaxIter      = 1
+mainMaxIter      = 5
 FULLTRAIN        = True
 DOKFOLD          = False
 FIXEDSPLIT       = False
-num_folds        = 2
+num_folds        = 3
 MANUALABLATION   = True
 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
@@ -63,18 +63,10 @@ feat2d = 'feat'
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-setup = 2
-if setup == 1:
-    firstDS = 'nangateV2'
-    secondDS = 'asap7V2'
-elif setup == 2:
-    firstDS = 'asap7V2'
-    secondDS = 'nangateV2' 
 LOADSECONDDS    = True
 MIXEDTEST       = True
 
-
-maxEpochs = 300
+maxEpochs = 600
 minEpochs = 150
 useEarlyStop = True
 step      = 0.005
@@ -89,21 +81,18 @@ DRAWOUTPUTS     = True
 DRAWGRAPHDATA   = True # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
-
-
 DEBUG           = 0 #1 for evaluation inside train
-CUDA            = True
+CUDA            = False
 SKIPFINALEVAL   = False #TODO True
 SELF_LOOP       = True
 COLAB           = False
 
-if 'nangate' in firstDS:
-    dsAbbreviated  = 'NG45'
-    dsAbbreviated2 = 'A7' 
-else:
-    dsAbbreviated = 'A7'
-    dsAbbreviated2 = 'NG45' 
 
+if CUDA:
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+else:
+    device = torch.device('cpu')
+    
 if CUDA:
     print( "torch.cuda.is_available():", torch.cuda.is_available() )
     print( "torch.cuda.device_count():", torch.cuda.device_count() )
@@ -697,7 +686,7 @@ class DataSetFromYosys( DGLDataset ):
                 external = pd.read_csv( str( designPath ) +'/'+ graphName+'-'+centr+'.csv' ) 
                 # print( "external centralities pandas:", external.shape )
                 for col in external.columns:
-                    print("col", col)
+                    #print("col", col)
                     if col.startswith( 'id' ):
                         external = external.rename( columns = { col: 'id' } )
                         filtered_columns = [ col for col in external.columns if 'id' in col or col.startswith( 'feat' ) ]
@@ -818,7 +807,7 @@ class DataSetFromYosys( DGLDataset ):
         if SELF_LOOP:
             self.graph = dgl.add_self_loop( self.graph )           
         print( "self.ablationFeatures (_process_single):", type( self.ablationFeatures ), len( self.ablationFeatures ), self.ablationFeatures )
-        print( "---> _process_single DONE.\n\tself.graph.ndata", type( self.graph ), "\n\t", self.graph.ndata, flush = True )
+        print( "---> _process_single DONE.\n\tself.graph.ndata", type( self.graph ) ) #, "\n\t", self.graph.ndata, flush = True )
         return self.graph
     
     # ###################### LOGIC DEPTH #####################################
@@ -1114,13 +1103,14 @@ class GAT(nn.Module):
 
  
 def evaluate( g, features, labels, model, path, device ):
-    torch.cuda.reset_peak_memory_stats()
+    if CUDA:
+        torch.cuda.reset_peak_memory_stats()
     model.eval()
     with torch.no_grad():
         if( features.dim() == 1 ):
             features = features.unsqueeze(1)
         predicted = model( g, features ) 
-        #print("\t>>>> predicted before squeeze:", type(predicted), predicted.shape, "\n", predicted )
+        #print("\t>>>> predicted core squeeze:", type(predicted), predicted.shape, "\n", predicted )
         predicted = predicted.squeeze(1)
 #        print( "\t>>> features in evaluate:", type( features ), features.shape ) #"\n", list ( features ) )
         print( "\t>>>> labels   in evaluate:", type( labels ), labels.shape, labels[:10] ) #"\n", labels )
@@ -1156,7 +1146,10 @@ def evaluate( g, features, labels, model, path, device ):
             path = path +"k{:.4f}".format( score_kendall ) + ".png"
             if DRAWOUTPUTS:
                 drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
-        memory_usage = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+        if CUDA:
+            memory_usage = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+        else:
+            memory_usage = 0
         print("memory usage in evaluate:", memory_usage )
         return score_kendall, corrPearson, pPearson, corrSpearman, pSpearman #score_r2, f1
 
@@ -1181,9 +1174,9 @@ def evaluate_in_batches( dataloader, device, model, image_path = "" ):
         total_kendall += score_kendall
         total_corrPearson      += corrPearson
         total_corrSpearman      += corrSpearman
-    total_kendall =  total_kendall / (batch_id + 1)
-    total_corrPearson      =  total_corrPearson / (batch_id + 1)
-    total_corrSpearman      =  total_corrSpearman / (batch_id + 1)
+    total_kendall        =  round( ( total_kendall / (batch_id + 1) ).item(), 3 )
+    total_corrPearson    =  round( ( total_corrPearson / (batch_id + 1) ).item(), 3 )
+    total_corrSpearman   =  round( ( total_corrSpearman / (batch_id + 1) ).item(), 3 )
     return total_kendall, total_corrPearson, total_corrSpearman # return average score
 
 def evaluate_single( graph, device, model, path ):
@@ -1193,15 +1186,16 @@ def evaluate_single( graph, device, model, path ):
     print( "evaluate single--->", path )                               
     score_kendall, corrPearson, _, corrSpearman, _ = evaluate( graph, features, labels, model, path, device )
     print( "Single graph score - Kendall:", score_kendall, ", corrPearson:", corrSpearman )
-    return score_kendall, corrSpearman, corrPearson
+    return round( score_kendall.item(), 3 ), round( corrSpearman.item(), 3 ), round( corrPearson.item(), 3 )
 
 
 def train( train_dataloader, device, model, writerName ):
     print( "device in train:", device )
     writer = SummaryWriter( comment = writerName )
 
-#    torch.cuda.reset_max_memory_allocated()
-    torch.cuda.reset_peak_memory_stats()
+    if CUDA:
+        # torch.cuda.reset_max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
     accumulated_memory_usage = 0
     max_memory_usage = 0
     
@@ -1247,12 +1241,16 @@ def train( train_dataloader, device, model, writerName ):
             #     total_loss += accumulated_loss.item()
             #     accumulated_loss = 0.0
 #####################################################################
-            memory_usage = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
-            max_memory_usage = max( max_memory_usage, memory_usage )
-            accumulated_memory_usage += memory_usage
+            if CUDA:
+                memory_usage = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
+                max_memory_usage = max( max_memory_usage, memory_usage )
+                accumulated_memory_usage += memory_usage
             
         average_loss = total_loss / len(train_dataloader)
-        average_memory_usage = accumulated_memory_usage / len(train_dataloader)
+        if CUDA:
+            average_memory_usage = accumulated_memory_usage / len(train_dataloader)
+        else:
+            average_memory_usage = 0
         if average_loss < best_loss - improvement_threshold:
             best_loss = average_loss
             epochs_without_improvement = 0  # Reset the counter
@@ -1301,15 +1299,23 @@ def train( train_dataloader, device, model, writerName ):
     return epoch, max_memory_usage, accumulated_memory_usage
 
 
-if __name__ == '__main__':
+def runExperiment( setup ):
+    # setup = 2
+    if setup == 1:
+        firstDS = 'nangateV2'
+        secondDS = 'asap7V2'
+        dsAbbreviated  = 'NG45'
+        dsAbbreviated2 = 'A7' 
+    elif setup == 2:
+        firstDS = 'asap7V2'
+        secondDS = 'nangateV2'
+        dsAbbreviated = 'A7'
+        dsAbbreviated2 = 'NG45'
+
+# if __name__ == '__main__':
     startTimeAll = time.time()
     imageOutput = "image_outputs"
     print(f'Training Yosys Dataset with DGL built-in GATConv module.')
-    
-    if CUDA:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    else:
-        device = torch.device('cpu')
 
     listDir = []	
     if COLAB:
@@ -1325,17 +1331,17 @@ if __name__ == '__main__':
     ##################################################################################
     ############################# Pre Processing #####################################
     ##################################################################################
-    writeDFrameData( listDir, 'gatesToHeatSTDfeatures.csv', "DSinfoBeforePreProcess.csv" )
-    df = aggregateData( listDir, 'gatesToHeatSTDfeatures.csv' )
-    print( "\n\n#######################\n## BEFORE PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
-    for col in df:
-        print( "describe:\n", df[ col ].describe() )
-    df.to_csv( "aggregatedDFBefore-pandasLevel.csv" )
-    df = df.drop( df.index[ df[ labelName ] < 0 ] )
-    df.hist( bins = 50, figsize = (15,12) )
-    plt.savefig( "BeforePreProcess-pandasLevel" )
-    plt.close( 'all' )
-    plt.clf()
+    # writeDFrameData( listDir, 'gatesToHeatSTDfeatures.csv', "DSinfoBeforePreProcess.csv" )
+    # df = aggregateData( listDir, 'gatesToHeatSTDfeatures.csv' )
+    # print( "\n\n#######################\n## BEFORE PRE ##\n####################### \n\nallDFs:\n", df )
+    # for col in df:
+    #     print( "describe:\n", df[ col ].describe() )
+    # df.to_csv( "aggregatedDFBefore-pandasLevel.csv" )
+    # df = df.drop( df.index[ df[ labelName ] < 0 ] )
+    # df.hist( bins = 50, figsize = (15,12) )
+    # plt.savefig( "BeforePreProcess-pandasLevel" )
+    # plt.close( 'all' )
+    # plt.clf()
 
     process_and_write_csvs( listDir )
     #preProcessData( listDir )
@@ -1348,18 +1354,18 @@ if __name__ == '__main__':
                 secondListDir.append( designPath )
         process_and_write_csvs( secondListDir )
 	
-    writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
-    df = aggregateData( listDir, 'preProcessedGatesToHeat.csv' )
-    print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
-    for col in df:
-	    print( "\n####describe:\n", df[ col ].describe() )
-    df.to_csv( "aggregatedDFAfter-pandasLevel.csv" )
-    df = df.drop( df.index[ df[ labelName ] < 0 ])
-    #df = df.drop( df.index[ df[ rawFeatName ] < 0 ] )
-    df.hist( bins = 50, figsize = (15,12) )
-    plt.savefig( "AfterPreProcess-pandasLevel" )
-    plt.close( 'all' )
-    plt.clf()
+    # writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
+    # df = aggregateData( listDir, 'preProcessedGatesToHeat.csv' )
+    # print( "\n\n#######################\n## AFTER PRE PROCESS ##\n####################### \n\nallDFs:\n", df )
+    # for col in df:
+    #         print( "\n####describe:\n", df[ col ].describe() )
+    # df.to_csv( "aggregatedDFAfter-pandasLevel.csv" )
+    # df = df.drop( df.index[ df[ labelName ] < 0 ])
+    # #df = df.drop( df.index[ df[ rawFeatName ] < 0 ] )
+    # df.hist( bins = 50, figsize = (15,12) )
+    # plt.savefig( "AfterPreProcess-pandasLevel" )
+    # plt.close( 'all' )
+    # plt.clf()
     ##################################################################################
     ##################################################################################
     ##################################################################################
@@ -1369,7 +1375,11 @@ if __name__ == '__main__':
     with open( summary, 'w' ) as f:
         f.write("")
     with open( ablationResult, 'w' ) as f:
-        f.write( "Features,Train-Mean,Train-SD,Test-Mean,Test-SD,TrainPearson-Mean,TrainPearson-SD,TrainSpearman-Mean,TrainSpearman-SD\n" ) 
+        f.write( "Features,Train-Mean,Train-SD,Test-Mean,Test-SD,TrainPearson-Mean,TrainPearson-SD,TrainSpearman-Mean,TrainSpearman-SD" )
+        if not MIXEDTEST:
+            f.write( "\n" )
+        else:
+            f.write( ",mixTestKendall,mixTestPearson,mixTestSpearman\n" )
     if os.path.exists( "runs" ):
         shutil.rmtree( "runs" )
 
@@ -1414,14 +1424,13 @@ if __name__ == '__main__':
             if sub_item not in validFeatures:
                 print(f"Error: '{sub_item}' is not in validFeatures.")
                 sys.exit()
-    for mainIteration in range( 0, mainMaxIter ):
-        print( "##################################################################################" )
-        print( "########################## NEW MAIN RUN  ########################################" )
-        print( "##################################################################################" )
-        print( "mainIteration:", mainIteration )
-        print( "--> combination_list:", len( ablationList ), ablationList )
-        ablationKendalls = []
-        for ablationIter in ablationList:
+    for ablationIter in ablationList:
+        for mainIteration in range( 0, mainMaxIter ):
+            print( "##################################################################################" )
+            print( "########################## NEW MAIN RUN  ########################################" )
+            print( "##################################################################################" )
+            print( "mainIteration:", mainIteration )
+            print( "--> combination_list:", len( ablationList ), ablationList )
             with open( ablationResult, 'a' ) as f:
                 abbreviations = {
                     'inDegree': 'ID',
@@ -1494,8 +1503,6 @@ if __name__ == '__main__':
                 # sys.exit()
                 continue
 
-            if FIXEDSPLIT or FULLTRAIN:
-                num_folds = 2  
             kf = KFold( n_splits = num_folds )
             for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
                  # LASCAS comparison, same as HUAWEI
@@ -1560,23 +1567,25 @@ if __name__ == '__main__':
                     if not FULLTRAIN:
                         test_kendall, test_corrPearson, test_corrSpearman    = evaluate_in_batches( test_dataloader,  device, model )
                     else:
-                        test_kendall = test_corrPearson = test_corrSpearman = torch.tensor([0]) #valid_kendall = valid_corrPearson = valid_corrSpearman = 
+                        # test_kendall = test_corrPearson = test_corrSpearman = torch.tensor([0]) #valid_kendall = valid_corrPearson = valid_corrSpearman =
+                        test_kendall = test_corrPearson = test_corrSpearman = 0
                     train_kendall, train_corrPearson, train_corrSpearman = evaluate_in_batches( train_dataloader, device, model )
 
                     # TODO: improve this, problem when accessing each graph name with batched graphs
-                    if DRAWOUTPUTS: 
+                    if DRAWOUTPUTS and mainIteration == 1: 
                         for n in test_indices:
                             g = theDataset[ n ].to( device )
                             path = theDataset.names[ n ]
-                            path = imageOutput + "/test-" + path +"-testIndex"+ str(test_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
+                            path = imageOutput + "/test-" + path +"-testIndex"+ '|'.join( map( str, test_indices ) )+"-e"+str( finalEpoch )+"-feat"+'|'.join( abbreviatedFeatures)
                             evaluate_single( g, device, model, path ) #using only for drawing for now
                         for n in train_indices:
                             g = theDataset[ n ].to( device )
                             path = theDataset.names[ n ]
-                            path = imageOutput + "/train-" + path +"-trainIndex"+ str(train_indices)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
+                            path = imageOutput + "/train-" + path +"-trainIndex"+ '|'.join( map( str, train_indices ) )+"-e"+str( finalEpoch )+"-feat"+'|'.join( abbreviatedFeatures )
                             evaluate_single( g, device, model, path ) #using only for drawing for now
                 else:
-                    test_kendall= test_corrPearson= test_corrSpearman= train_kendall= train_corrPearson= train_corrSpearman= torch.tensor([0]) #valid_kendall= valid_corrPearson= valid_corrSpearman= 
+                    #test_kendall= test_corrPearson= test_corrSpearman= train_kendall= train_corrPearson= train_corrSpearman= torch.tensor([0]) #valid_kendall= valid_corrPearson= valid_corrSpearman=
+                    test_kendall= test_corrPearson= test_corrSpearman= train_kendall= train_corrPearson= train_corrSpearman= 0
 
                 print( "Total Train Kendall {:.4f}".format( train_kendall ) )
                 print( "Total Train CORRPEARSON {:.4f}".format( train_corrPearson ) )
@@ -1585,17 +1594,18 @@ if __name__ == '__main__':
                 iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
                 print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n", flush = True )
 
-                kendallTest.append ( test_kendall.item()  )
-                kendallTrain.append( train_kendall.item() )
-                pearsonTrain.append( train_corrPearson.item() )
-                spearmanTrain.append( train_corrSpearman.item() )
+                kendallTest.append ( test_kendall  )
+                kendallTrain.append( train_kendall )
+                pearsonTrain.append( train_corrPearson )
+                spearmanTrain.append( train_corrSpearman )
                 with open( summary, 'a' ) as f:
                     f.write( '|'.join(map(str, train_indices)) + ',' + '|'.join(map(str, test_indices)) + ","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch ) )
-                    f.write( ","+ "| ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( round( train_kendall.item(), 3) ) +","+ str( round( test_kendall.item(), 3 ) ))
-                    f.write( "," + str( round(  train_corrPearson.item(), 3 ) ) +","+ str( round(  test_corrPearson.item(), 3 ) ) )
-                    f.write( "," + str( round( train_corrSpearman.item(), 3 ) ) +","+ str( round( test_corrSpearman.item(), 3 ) )  +"\n" )
-                    
-                torch.cuda.empty_cache()
+                    f.write( ","+ "| ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( train_kendall ) +","+ str( test_kendall ))
+                    f.write( "," + str( train_corrPearson ) +","+ str( test_corrPearson ) )
+                    f.write( "," + str( train_corrSpearman ) +","+ str( test_corrSpearman )  +"\n" )
+
+                if CUDA:
+                    torch.cuda.empty_cache()
                 if FULLTRAIN:
                     break
                     break
@@ -1608,14 +1618,9 @@ if __name__ == '__main__':
 
             # K fold loop end here
             with open( summary, 'a' ) as f:
-                f.write( ",,,,,,Average," + str(   round( sum( kendallTrain ) / len( kendallTrain ), 3 ) ) +","+ str( round( sum( kendallTest ) / len( kendallTest ), 3 ) ) + "\n" )
-                f.write( ",,,,,,Median,"  + str(   round( statistics.median( kendallTrain ), 3 ) ) +","+ str( round( statistics.median( kendallTest ), 3 ) ) +"\n" )
-                f.write( ",,,,,,Std Dev," + ( str( round( statistics.stdev ( kendallTrain ), 3 ) ) if len( kendallTrain ) > 1 else "N/A" ) +","+ ( str( round( statistics.stdev( kendallTest ), 3 ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
-            with open( ablationResult, 'a' ) as f:
-                f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) )
-                f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ ( str( statistics.stdev( kendallTest ) )  if len( kendallTest )  > 1 else "N/A" ) )
-                f.write( ","+ str( sum( pearsonTrain ) / len( pearsonTrain ) ) +","+ ( str( statistics.stdev( pearsonTrain ) ) if len( pearsonTrain ) > 1 else "N/A" ) )
-                f.write( ","+ str( sum( spearmanTrain ) / len( spearmanTrain ) ) +","+ ( str( statistics.stdev( spearmanTrain ) ) if len( spearmanTrain ) > 1 else "N/A" ) + "\n" )
+                f.write( ",,,,,,Average," + str(   sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
+                f.write( ",,,,,,Median,"  + str(   statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
+                f.write( ",,,,,,Std Dev," + ( str( statistics.stdev ( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) +","+ ( str( statistics.stdev( kendallTest ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
             if MIXEDTEST and LOADSECONDDS:
                 ##################################################################################
                 ######################### MIXED TECHNOLOGY TESTING ###############################
@@ -1629,17 +1634,26 @@ if __name__ == '__main__':
                 with open( summary, 'a' ) as f:
                     f.write( "mixed test:"+ dsAbbreviated2 +"," )
                     f.write( '|'.join( map( str, test_indices2 ) ) + ',' )
-                    f.write( ","+ str( endTimeMixedTest )+","+ "| ".join( secondDataset.getNames()[i] for i in test_indices2 ) +",,,mixedTest,"+ str( round( test_kendall2.item(), 3 ) ))
-                    f.write( ",,"+ str( round(  test_corrPearson2.item(), 3 ) ) )
-                    f.write( ",,"+ str( round( test_corrSpearman2.item(), 3 ) )  +"\n" )
+                    f.write( ","+  str( endTimeMixedTest )+","+ "| ".join( secondDataset.getNames()[i] for i in test_indices2 ) +",,,mixedTest-"+ dsAbbreviated2 +","+ str( test_kendall2 ))
+                    f.write( ",,"+ str( test_corrPearson2 ) )
+                    f.write( ",,"+ str( test_corrSpearman2 )  +"\n" )
                 print( "mixed test kendall ", dsAbbreviated2, test_kendall2 )
                 print( "time mixed test:", endTimeMixedTest )
-                if DRAWOUTPUTS:
+                if DRAWOUTPUTS and mainIteration == 1: 
                     for n in test_indices2:
                         g = secondDataset[ n ].to( device )
                         path = secondDataset.names[ n ]
-                        path = imageOutput + "/mixedTest-" + path +"-idx"+ str(test_indices2)+"-e"+str(finalEpoch)+"-feat"+str(abbreviatedFeatures)
+                        path = imageOutput + "/mixedTest-" + path +"-idx"+ '|'.join( map( str, test_indices2 ) )+"-e"+str( finalEpoch )+"-feat"+'|'.join( abbreviatedFeatures )
                         evaluate_single( g, device, model, path ) #using only for drawing for now
+            with open( ablationResult, 'a' ) as f:
+                f.write( ","+ str( sum( kendallTrain ) / len( kendallTrain ) ) +","+ ( str( statistics.stdev( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) )
+                f.write( ","+ str( sum( kendallTest ) / len( kendallTest ) )   +","+ ( str( statistics.stdev( kendallTest ) )  if len( kendallTest )  > 1 else "N/A" ) )
+                f.write( ","+ str( sum( pearsonTrain ) / len( pearsonTrain ) ) +","+ ( str( statistics.stdev( pearsonTrain ) ) if len( pearsonTrain ) > 1 else "N/A" ) )
+                f.write( ","+ str( sum( spearmanTrain ) / len( spearmanTrain ) ) +","+ ( str( statistics.stdev( spearmanTrain ) ) if len( spearmanTrain ) > 1 else "N/A" ) )
+                if not MIXEDTEST:
+                    f.write( "\n" )
+                else:
+                    f.write( ","+ str( test_kendall2 ) +","+ str( test_corrPearson2 ) +","+ str( test_corrSpearman2 ) + "\n" )
                 
             folder_name = f"{str(abbreviatedFeatures)}-{mainIteration}"
             if DRAWOUTPUTS:
@@ -1673,3 +1687,10 @@ if __name__ == '__main__':
     shutil.copy("regression.py", os.path.join(folder_name, "regression.py"))
     with open( 'log.log', 'w' ) as f:
         f.write('')
+
+
+if __name__ == '__main__':
+    print( "\n\n-------------------------------\n---------Run setup 1 (NG first DS)----------\n-------------------------\n\n" )
+    runExperiment( 1 )
+    print( "\n\n-------------------------------\n---------Run setup 2 (A7 first DS)----------\n-------------------------\n\n" )
+    runExperiment( 2 )
