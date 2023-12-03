@@ -82,7 +82,7 @@ DRAWGRAPHDATA   = True # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
 DEBUG           = 0 #1 for evaluation inside train
-CUDA            = False
+CUDA            = True
 SKIPFINALEVAL   = False #TODO True
 SELF_LOOP       = True
 COLAB           = False
@@ -1572,7 +1572,7 @@ def runExperiment( setup ):
                     train_kendall, train_corrPearson, train_corrSpearman = evaluate_in_batches( train_dataloader, device, model )
 
                     # TODO: improve this, problem when accessing each graph name with batched graphs
-                    if DRAWOUTPUTS and mainIteration == 1: 
+                    if DRAWOUTPUTS and mainIteration == 0: 
                         for n in test_indices:
                             g = theDataset[ n ].to( device )
                             path = theDataset.names[ n ]
