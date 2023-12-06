@@ -1,4 +1,4 @@
-import os
+mport os
 import sys
 import shutil
 import csv
@@ -49,11 +49,11 @@ validFeatures = [ 'closeness',  'betweenness' , 'eigen', 'pageRank', 'inDegree',
 externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' ]
 globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
 
-mainMaxIter      = 5
-FULLTRAIN        = True
-DOKFOLD          = False
+mainMaxIter      = 1
+FULLTRAIN        = False
+DOKFOLD          = True
 FIXEDSPLIT       = False
-num_folds        = 3
+num_folds        = 10
 MANUALABLATION   = True
 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
@@ -63,21 +63,22 @@ feat2d = 'feat'
 labelName =  'routingHeat'
 secondLabel = 'placementHeat'
 
-LOADSECONDDS    = True
-MIXEDTEST       = True
+LOADSECONDDS    = False
+MIXEDTEST       = False
+FUSIONDS        = True
 
-maxEpochs = 600
+maxEpochs = 800
 minEpochs = 150
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
-patience = 35  # Number of epochs without improvement to stop training
+patience = 45  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
 DOLEARN         = True
 REMOVEFAKERAM   = True
 
-DRAWOUTPUTS     = True
+DRAWOUTPUTS     = False
 DRAWGRAPHDATA   = True # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
@@ -735,17 +736,18 @@ class DataSetFromYosys( DGLDataset ):
         self.graph = dgl.graph( ( edges_src, edges_dst ), num_nodes = nodes_data.shape[0] )
         self.graph.name = graphName
 
-        for centr in externalCentralities:
-            if centr in self.ablationFeatures:
-                self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, torch.tensor( nodes_data[ centr ].values ) )
-                if centr not in self.namesOfFeatures:                    
-                    self.namesOfFeatures.append( centr )        
-        
         for featStr in stdCellFeats:
             if featStr in self.ablationFeatures:
                 self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, torch.tensor( nodes_data[ featStr ].values ) )
                 if featStr not in self.namesOfFeatures:
                     self.namesOfFeatures.append( featStr )
+
+        for centr in externalCentralities:
+            if centr in self.ablationFeatures:
+                self.graph.ndata[ feat2d ] = dynamicConcatenate( self.graph.ndata, torch.tensor( nodes_data[ centr ].values ) )
+                if centr not in self.namesOfFeatures:                    
+                    self.namesOfFeatures.append( centr )        
+    
         self.graph.ndata[ labelName  ]  = ( torch.from_numpy ( nodes_data[ labelName   ].to_numpy() ) )
         self.graph.ndata[ "position" ] = torch.tensor( nodes_data[ [ "xMin","yMin","xMax","yMax" ] ].values )
     ################### REMOVE NODES #############################################
@@ -1301,16 +1303,21 @@ def train( train_dataloader, device, model, writerName ):
 
 def runExperiment( setup ):
     # setup = 2
-    if setup == 1:
-        firstDS = 'nangateV2'
-        secondDS = 'asap7V2'
-        dsAbbreviated  = 'NG45'
-        dsAbbreviated2 = 'A7' 
-    elif setup == 2:
-        firstDS = 'asap7V2'
-        secondDS = 'nangateV2'
-        dsAbbreviated = 'A7'
-        dsAbbreviated2 = 'NG45'
+    if not FUSIONDS:
+        if setup == 1:
+            firstDS        = 'nangateV2'
+            secondDS       = 'asap7V2'
+            dsAbbreviated  = 'NG45'
+            dsAbbreviated2 = 'A7' 
+        elif setup == 2:
+            firstDS        = 'asap7V2'
+            secondDS       = 'nangateV2'
+            dsAbbreviated  = 'A7'
+            dsAbbreviated2 = 'NG45'
+    else:
+        firstDS       = 'nangateV2'
+        secondDS      = 'asap7V2'
+        dsAbbreviated = 'NG45+A7'
 
 # if __name__ == '__main__':
     startTimeAll = time.time()
@@ -1345,7 +1352,7 @@ def runExperiment( setup ):
 
     process_and_write_csvs( listDir )
     #preProcessData( listDir )
-    if MIXEDTEST or DRAWGRAPHDATA:
+    if LOADSECONDDS or FUSIONDS:
         secondListDir = []
         secondDSPath = Path.cwd() / secondDS
         for designPath in Path( secondDSPath ).iterdir():
@@ -1353,6 +1360,8 @@ def runExperiment( setup ):
                 print("designPath:", designPath )
                 secondListDir.append( designPath )
         process_and_write_csvs( secondListDir )
+        if FUSIONDS:
+            listDir = listDir + secondListDir
 	
     # writeDFrameData( listDir, 'preProcessedGatesToHeat.csv', "DSinfoAfterPreProcess.csv" )
     # df = aggregateData( listDir, 'preProcessedGatesToHeat.csv' )
@@ -1406,14 +1415,16 @@ def runExperiment( setup ):
             ablationList += list( combinations( fullAblationCombs, combSize ) )
             print( "ablationList:", len( ablationList ), ablationList )
     else:
-        # ablationList = [('area', 'input_pins', 'output_pins', 'type', 'eigen', 'pageRank', 'inDegree', 'outDegree') ]
-        #ablationList = [ ( 'betweenness', 'closeness' ) ] #('outDegree',), ('inDegree',), ('input_pins',), ('output_pins',), ('inDegree','outDegree'), ('input_pins','output_pins') ]
-        # ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)]
-        # ablationList =  [ tuple( validFeatures ) ] 
+        # ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)] # um por um, depois todos juntos
+        
         ablationList = [ tuple(  [item for item in validFeatures if item != 'type' ] ) ]
-        ablationList += [ ( 'closeness', 'eigen' , 'outDegree')  ] # A7 only, best corr with label
-        ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree')  ] # NG45 only, best corr with label
-        ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'input_pins', 'output_pins')  ] # NG45 only, best corr with label
+        # ablationList += [ ( 'closeness', 'eigen' , 'outDegree')  ] # A7 only, best corr with label
+        # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree')  ] # NG45 only, best corr with label
+        # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'input_pins', 'output_pins')  ] # NG45 only, best corr with label
+
+        ablationList += [ ( 'area', 'input_pins', 'output_pins' ) ]
+        ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen') ]
+        
 
         
 
@@ -1446,7 +1457,7 @@ def runExperiment( setup ):
                 
             with open( summary, 'a' ) as f:
                 f.write( "trainDS: " + dsAbbreviated + ",MIXEDTEST:" )
-                if MIXEDTEST:
+                if MIXEDTEST and not FUSIONDS:
                     f.write( secondDS )
                 else:
                     f.write( "False" )
@@ -1467,7 +1478,7 @@ def runExperiment( setup ):
             ablationIter = list( ablationIter )
             if os.path.exists( imageOutput ):
                 shutil.rmtree( imageOutput )
-            if DRAWOUTPUTS:
+            if DRAWOUTPUTS and mainIteration == 0:
                 os.makedirs( imageOutput )
                 aux = imageOutput + "/histogram"
                 os.makedirs( aux )
@@ -1482,21 +1493,23 @@ def runExperiment( setup ):
             pearsonTrain = []
             spearmanTrain = []
             
-
-            theDataset    = DataSetFromYosys( listDir, ablationIter )
-            if LOADSECONDDS:
-                secondDataset = DataSetFromYosys( secondListDir, ablationIter )
+            if not FUSIONDS:
+                theDataset    = DataSetFromYosys( listDir, ablationIter )
+                if LOADSECONDDS:
+                    secondDataset = DataSetFromYosys( secondListDir, ablationIter )
+            else:
+                theDataset = DataSetFromYosys( listDir, ablationIter )
                 
             if DRAWGRAPHDATA:
                 theDataset.drawSingleCorrelationMatrix( '|'.join( abbreviatedFeatures ), dsAbbreviated )
                 theDataset.drawDataAnalysis(   '|'.join( abbreviatedFeatures ), dsAbbreviated )
-                if LOADSECONDDS:
+                if LOADSECONDDS and not FUSIONDS:
                     secondDataset.drawSingleCorrelationMatrix( '|'.join( abbreviatedFeatures ), dsAbbreviated2 )
                     secondDataset.drawDataAnalysis(   '|'.join( abbreviatedFeatures ), dsAbbreviated2 )
 
             if DRAWHEATCENTR:
                 theDataset.drawHeatCentrality( '|'.join( abbreviatedFeatures ), dsAbbreviated )    
-                if LOADSECONDDS:
+                if LOADSECONDDS and not FUSIONDS:
                     secondDataset.drawHeatCentrality( '|'.join( abbreviatedFeatures ), dsAbbreviated2 )
                 
             if not DOLEARN:
@@ -1576,7 +1589,7 @@ def runExperiment( setup ):
                         for n in test_indices:
                             g = theDataset[ n ].to( device )
                             path = theDataset.names[ n ]
-                            path = imageOutput + "/test-" + path +"-testIndex"+ '|'.join( map( str, test_indices ) )+"-e"+str( finalEpoch )+"-feat"+'|'.join( abbreviatedFeatures)
+                            path = imageOutput + "/test-" + path +"-testIndex"+ '|'.join( map( str, test_indices ) )+"-e"+str( finalEpoch )+"-feat"+'|'.join( abbreviatedFeatures )
                             evaluate_single( g, device, model, path ) #using only for drawing for now
                         for n in train_indices:
                             g = theDataset[ n ].to( device )
@@ -1621,7 +1634,7 @@ def runExperiment( setup ):
                 f.write( ",,,,,,Average," + str(   sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
                 f.write( ",,,,,,Median,"  + str(   statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
                 f.write( ",,,,,,Std Dev," + ( str( statistics.stdev ( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) +","+ ( str( statistics.stdev( kendallTest ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
-            if MIXEDTEST and LOADSECONDDS:
+            if MIXEDTEST and LOADSECONDDS and not FUSIONDS:
                 ##################################################################################
                 ######################### MIXED TECHNOLOGY TESTING ###############################
                 ##################################################################################
@@ -1639,7 +1652,7 @@ def runExperiment( setup ):
                     f.write( ",,"+ str( test_corrSpearman2 )  +"\n" )
                 print( "mixed test kendall ", dsAbbreviated2, test_kendall2 )
                 print( "time mixed test:", endTimeMixedTest )
-                if DRAWOUTPUTS and mainIteration == 1: 
+                if DRAWOUTPUTS and mainIteration == 0: 
                     for n in test_indices2:
                         g = secondDataset[ n ].to( device )
                         path = secondDataset.names[ n ]
@@ -1656,7 +1669,7 @@ def runExperiment( setup ):
                     f.write( ","+ str( test_kendall2 ) +","+ str( test_corrPearson2 ) +","+ str( test_corrSpearman2 ) + "\n" )
                 
             folder_name = f"{str(abbreviatedFeatures)}-{mainIteration}"
-            if DRAWOUTPUTS:
+            if DRAWOUTPUTS and mainIteration == 0:
                 shutil.move( imageOutput, folder_name )
             del theDataset
             # ablation loop end here
@@ -1692,5 +1705,6 @@ def runExperiment( setup ):
 if __name__ == '__main__':
     print( "\n\n-------------------------------\n---------Run setup 1 (NG first DS)----------\n-------------------------\n\n" )
     runExperiment( 1 )
-    print( "\n\n-------------------------------\n---------Run setup 2 (A7 first DS)----------\n-------------------------\n\n" )
-    runExperiment( 2 )
+    if not FUSIONDS:
+        print( "\n\n-------------------------------\n---------Run setup 2 (A7 first DS)----------\n-------------------------\n\n" )
+        runExperiment( 2 )
