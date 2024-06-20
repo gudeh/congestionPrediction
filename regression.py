@@ -67,10 +67,10 @@ LOADSECONDDS    = False
 MIXEDTEST       = False
 FUSIONDS        = False
 
-# maxEpochs = 400
-# minEpochs = 125
-maxEpochs = 10
-minEpochs = 10
+maxEpochs = 800
+minEpochs = 200
+# maxEpochs = 10
+# minEpochs = 10
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
@@ -81,7 +81,7 @@ DOLEARN         = True
 REMOVEFAKERAM   = True
 
 DRAWOUTPUTS     = False
-DRAWGRAPHDATA   = True # draws histograms and correlation matrix
+DRAWGRAPHDATA   = False # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
 DEBUG           = 0 #1 for evaluation inside train
@@ -1558,9 +1558,9 @@ def runExperiment( setup ):
                 # train_indices = [7] 
                 # test_indices = [ i for i in range( len( theDataset ) ) if i != 7 ]  # black_parrot, 4:remove bp_be_top
 
-                # Only ng45 nonRepeating as test
-                # train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11 ]  # 6-aes, 3-gcd, ibex-8, 13-jpeg, 12-swerv_wr, 2-swerv, 1-dynamicNode, 11-eth
-                # test_indices =  [ 0, 4, 5, 7, 9, 10 ] # 0-bp_fe, 4-bp_be, 5-rocket, 7-bp, 9-ariane, bp_multi
+                Only ng45 nonRepeating as test
+                train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11 ]  # 6-aes, 3-gcd, ibex-8, 13-jpeg, 12-swerv_wr, 2-swerv, 1-dynamicNode, 11-eth
+                test_indices =  [ 0, 4, 5, 7, 9, 10 ] # 0-bp_fe, 4-bp_be, 5-rocket, 7-bp, 9-ariane, bp_multi
 
                 # # Only A7 nonRepeating as test
                 # train_indices = [ 4, 2, 5, 10, 8, 1, 0, 7  ]  # 4-aes, 2-gcd, 5-ibex, 10-jpeg, 8-swerv_wr, 1-swerv, 0-dynamic, 7-eth
