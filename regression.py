@@ -1,4 +1,4 @@
-mport os
+import os
 import sys
 import shutil
 import csv
@@ -40,7 +40,7 @@ from dgl.data.ppi import PPIDataset #TODO remove
 import dgl.nn as dglnn
 import networkx as nx #drawing graphs
 
-from sklearn.metrics import r2_score, f1_score #Score metric
+from sklearn.metrics import r2_score, precision_recall_fscore_support, accuracy_score
 from sklearn.model_selection import KFold
 from torchmetrics.regression import KendallRankCorrCoef #Same score as congestionNet
 
@@ -52,8 +52,8 @@ globalNormMode = 'oneZero' #'meanStd' #'oneZero'
 mainMaxIter      = 1
 FULLTRAIN        = False
 DOKFOLD          = True
-FIXEDSPLIT       = False
-num_folds        = 10
+FIXEDSPLIT       = True
+num_folds        = 2
 MANUALABLATION   = True
 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
@@ -65,10 +65,12 @@ secondLabel = 'placementHeat'
 
 LOADSECONDDS    = False
 MIXEDTEST       = False
-FUSIONDS        = True
+FUSIONDS        = False
 
-maxEpochs = 800
-minEpochs = 150
+# maxEpochs = 400
+# minEpochs = 125
+maxEpochs = 10
+minEpochs = 10
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
@@ -1103,83 +1105,110 @@ class GAT(nn.Module):
         return h
 
 
- 
-def evaluate( g, features, labels, model, path, device ):
-    if CUDA:
+THRESHOLD = 0.75
+
+def evaluate(g, features, labels, model, path, device):
+    if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     model.eval()
     with torch.no_grad():
-        if( features.dim() == 1 ):
+        if features.dim() == 1:
             features = features.unsqueeze(1)
-        predicted = model( g, features ) 
-        #print("\t>>>> predicted core squeeze:", type(predicted), predicted.shape, "\n", predicted )
+        predicted = model(g, features)
         predicted = predicted.squeeze(1)
-#        print( "\t>>> features in evaluate:", type( features ), features.shape ) #"\n", list ( features ) )
-        print( "\t>>>> labels   in evaluate:", type( labels ), labels.shape, labels[:10] ) #"\n", labels )
-        print( "\t>>>> predicted after squeeze:", type( predicted ), predicted.shape, predicted[:10] )# "\n", predicted )
-
-        # tp, tn, fp, fn = getPN( labels, predicted, 0.75 )
-        # print( "tp, tn, fp, fn:", tp, tn, fp, fn )
-        # f1 = getF1( tp, tn, fp, fn)
-        # score_r2 = r2_score( labels.data.cpu(), predicted.data.cpu() )
-        # f1 = np.float64(0.0)
-        # score_r2 = np.float64(0.0)
-        # print( "F1:", f1 )
-        # print( "score_r2:", type(score_r2), score_r2 )
         
-        kendall = KendallRankCorrCoef( variant = 'a' ).to( device )
-        print( "calculating kendal...", flush=True )
-        score_kendall = kendall( predicted, labels )
-        print( "Kendall calculated", flush=True )
+        print("\t>>>> labels in evaluate:", type(labels), labels.shape, labels[:10])
+        print("\t>>>> predicted after squeeze:", type(predicted), predicted.shape, predicted[:10])
+
+        binary_preds = ((predicted > THRESHOLD) & (labels > THRESHOLD)).long()        
+        binary_labels = (labels > THRESHOLD).long()
+
+        print("\t>>>> binary_preds:", binary_preds[:10])
+        print("\t>>>> binary_labels:", binary_labels[:10])
+
+        tp = (binary_preds * binary_labels).sum().item()
+        tn = ((1 - binary_preds) * (1 - binary_labels)).sum().item()
+        fp = (binary_preds * (1 - binary_labels)).sum().item()
+        fn = ((1 - binary_preds) * binary_labels).sum().item()
+
+        print(f"\t>>>> tp: {tp}, tn: {tn}, fp: {fp}, fn: {fn}")
+
+        precision, recall, f1, _ = precision_recall_fscore_support(binary_labels.cpu(), binary_preds.cpu(), average='binary')
+        accuracy = accuracy_score(binary_labels.cpu(), binary_preds.cpu())
+
+        # Debugging prints to check the metrics
+        print(f"\t>>>> Precision: {precision}, Recall: {recall}, F1: {f1}, Accuracy: {accuracy}")
+
+        mse = F.mse_loss(predicted, labels).item()
+        print("Mean Squared Error:", mse)
+        rmse = math.sqrt(mse)
+        print("Root Mean Squared Error:", rmse)
+        kendall = KendallRankCorrCoef(variant='a').to(device)
+
+        print("calculating kendal...", flush=True)
+        score_kendall = kendall(predicted, labels)
+        print("Kendall calculated", flush=True)
 
         predicted_cpu = predicted.cpu().detach().numpy()
         labels_cpu = labels.cpu().detach().numpy()
-        corrPearson, pPearson = pearsonr( predicted_cpu, labels_cpu )
-        print("Pearson correlation:", corrPearson,flush=True)
-        corrSpearman, pSpearman = spearmanr( predicted_cpu, labels_cpu )
+        corrPearson, pPearson = pearsonr(predicted_cpu, labels_cpu)
+        print("Pearson correlation:", corrPearson, flush=True)
+        corrSpearman, pSpearman = spearmanr(predicted_cpu, labels_cpu)
         print("Spearman correlation:", corrSpearman, flush=True)
-        
-        # corrPearson,  pPearson  = scipy.stats.pearsonr( predicted, labels )
-        # corrSpearman, pSpearman = scipy.stats.spearmanr( predicted, labels )
 
-        #print("score_kendall:", type( score_kendall ), str( score_kendall ), "\n", score_kendall,"\n\n")
-        if len( path ) > 0:
-            print( "\tdrawing output" )
-            path = path +"k{:.4f}".format( score_kendall ) + ".png"
+        if len(path) > 0:
+            print("\tdrawing output")
+            path = path + "k{:.4f}".format(score_kendall) + ".png"
             if DRAWOUTPUTS:
-                drawHeat( labels.to( torch.float32 ), predicted.to( torch.float32 ), path, g )
-        if CUDA:
+                drawHeat(labels.to(torch.float32), predicted.to(torch.float32), path, g)
+        if torch.cuda.is_available():
             memory_usage = torch.cuda.max_memory_allocated() / (1024.0 * 1024.0)
         else:
             memory_usage = 0
-        print("memory usage in evaluate:", memory_usage )
-        return score_kendall, corrPearson, pPearson, corrSpearman, pSpearman #score_r2, f1
+        print("memory usage in evaluate:", memory_usage)
 
-def evaluate_in_batches( dataloader, device, model, image_path = "" ):
+        return score_kendall, rmse, corrPearson, pPearson, corrSpearman, pSpearman, precision, recall, f1, accuracy
+
+def evaluate_in_batches(dataloader, device, model, image_path=""):
     total_kendall = 0.0
-    total_corrPearson      = 0.0
-    total_corrSpearman      = 0.0
-    # names = dataloader.dataset.names
-    # print("names in evaluate_in_batches:", names )
-    for batch_id, batched_graph in enumerate( dataloader ):
-        print( "batch_id (eval_in_batches):", batch_id )
-        batched_graph = batched_graph.to( device )
-        print( "batched_graph:", type( batched_graph ) )#, batched_graph )
-        #print( "theDataset[ batch_id ]:", theDataset[ batch_id ] )
-        features = batched_graph.ndata[ feat2d ].float().to( device )
-        labels   = batched_graph.ndata[ labelName ].to( device )
+    total_corrPearson = 0.0
+    total_corrSpearman = 0.0
+    total_precision = 0.0
+    total_recall = 0.0
+    total_f1 = 0.0
+    total_accuracy = 0.0
+    total_rmse = 0.0
+
+    for batch_id, batched_graph in enumerate(dataloader):
+        print("batch_id (eval_in_batches):", batch_id)
+        batched_graph = batched_graph.to(device)
+        features = batched_graph.ndata[feat2d].float().to(device)
+        labels = batched_graph.ndata[labelName].to(device)
+
+        score_kendall, rmse, corrPearson, _, corrSpearman, _, precision, recall, f1, accuracy = evaluate(
+            batched_graph, features, labels, model, image_path, device)
         
-#        print("features in evaluate_in_batches:", type(features), features.shape,"\n", features )
-#        print("labels in evaluate_in_batches:", type(labels), labels.shape,"\n", labels )
-        score_kendall, corrPearson,_, corrSpearman,_ = evaluate( batched_graph, features, labels, model, image_path, device )
-        print( "partial Kendall (eval_in_batches):", score_kendall ) 
         total_kendall += score_kendall
-        total_corrPearson      += corrPearson
-        total_corrSpearman      += corrSpearman
-    total_kendall        =  round( ( total_kendall / (batch_id + 1) ).item(), 3 )
-    total_corrPearson    =  round( ( total_corrPearson / (batch_id + 1) ).item(), 3 )
-    total_corrSpearman   =  round( ( total_corrSpearman / (batch_id + 1) ).item(), 3 )
-    return total_kendall, total_corrPearson, total_corrSpearman # return average score
+        total_rmse += rmse
+        total_corrPearson += corrPearson
+        total_corrSpearman += corrSpearman
+        total_precision += precision
+        total_recall += recall
+        total_f1 += f1
+        total_accuracy += accuracy        
+
+    num_batches = batch_id + 1
+    avg_kendall = round(total_kendall.item() / num_batches, 3)
+    avg_rmse = round(total_rmse / num_batches, 3)
+    avg_corrPearson = round(total_corrPearson / num_batches, 3)
+    avg_corrSpearman = round(total_corrSpearman / num_batches, 3)
+    avg_precision = round(total_precision / num_batches, 3)
+    avg_recall = round(total_recall / num_batches, 3)
+    avg_f1 = round(total_f1 / num_batches, 3)
+    avg_accuracy = round(total_accuracy / num_batches, 3)
+
+    return avg_kendall, avg_rmse, avg_corrPearson, avg_corrSpearman, avg_precision, avg_recall, avg_f1, avg_accuracy
+
 
 def evaluate_single( graph, device, model, path ):
     graph = graph.to( device )
@@ -1415,16 +1444,20 @@ def runExperiment( setup ):
             ablationList += list( combinations( fullAblationCombs, combSize ) )
             print( "ablationList:", len( ablationList ), ablationList )
     else:
+        #all features
+        ablationList =   [('closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree', 'area', 'input_pins', 'output_pins')]
         # ablationList = [(string,) for string in validFeatures] + [tuple(validFeatures)] # um por um, depois todos juntos
         
-        ablationList = [ tuple(  [item for item in validFeatures if item != 'type' ] ) ]
-        # ablationList += [ ( 'closeness', 'eigen' , 'outDegree')  ] # A7 only, best corr with label
-        # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree')  ] # NG45 only, best corr with label
-        # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'input_pins', 'output_pins')  ] # NG45 only, best corr with label
-
+        # ablationList = [ tuple(  [item for item in validFeatures if item != 'type' ] ) ]
+        # # ablationList += [ ( 'closeness', 'eigen' , 'outDegree')  ] # A7 only, best corr with label
+        # # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree')  ] # NG45 only, best corr with label
+        # # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'input_pins', 'output_pins')  ] # NG45 only, best corr with label
+        
         ablationList += [ ( 'area', 'input_pins', 'output_pins' ) ]
         ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen') ]
-        
+        ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen', 'inDegree', 'outDegree' ) ]
+        ablationList += [ ( 'closeness', 'pageRank', 'eigen', 'inDegree', 'outDegree' ) ]
+        ablationList += [ ( 'closeness', 'inDegree', 'outDegree' ) ]
 
         
 
@@ -1472,7 +1505,7 @@ def runExperiment( setup ):
                 f.write( ",MANUALABLATION:" + str( MANUALABLATION ) )
                 f.write( ",improvement_threshold:" + str( improvement_threshold ) )
                 f.write( ",patience:" + str( patience ) )
-                f.write( "\ntrainIndices,testIndices,finalEpoch,runtime(min),MaxMemory,AverageMemory, Circuit Test, TrainKendall, TestKendall, TrainPearson, TestPearson, TrainSpearman, TestSpearman\n" )
+                f.write( "\ntrainIndices,testIndices,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Test,TrainKendall,TestKendall,trainRMSE,testRMSE,TrainPearson,TestPearson,TrainSpearman,TestSpearman,trainPrecision,testPrecision,trainRecall,testRecall,trainF1,testF1,trainAccuracy,testAccuracy\n" )
 
             print( "\n%%%%%%%%%%%%%%%%%%%%%%%%%%\nablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, "\n%%%%%%%%%%%%%%%%%%%%%%%%%%%\n", flush = True )
             ablationIter = list( ablationIter )
@@ -1518,13 +1551,25 @@ def runExperiment( setup ):
 
             kf = KFold( n_splits = num_folds )
             for fold, ( train_indices, test_indices ) in enumerate( kf.split( theDataset ) ):
-                 # LASCAS comparison, same as HUAWEI
-                 # train_indices = [i for i in range(len(theDataset)) if i !=2 and i !=4] # remove swerv and bp_be_top
-                 # test_indices = [2]
+                # LASCAS comparison, same as HUAWEI
+                # train_indices = [i for i in range(len(theDataset)) if i !=2 and i !=4] # remove swerv and bp_be_top
 
                 # HUAWEI's ablation, only Black_parrot
                 # train_indices = [7] 
                 # test_indices = [ i for i in range( len( theDataset ) ) if i != 7 ]  # black_parrot, 4:remove bp_be_top
+
+                # Only ng45 nonRepeating as test
+                # train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11 ]  # 6-aes, 3-gcd, ibex-8, 13-jpeg, 12-swerv_wr, 2-swerv, 1-dynamicNode, 11-eth
+                # test_indices =  [ 0, 4, 5, 7, 9, 10 ] # 0-bp_fe, 4-bp_be, 5-rocket, 7-bp, 9-ariane, bp_multi
+
+                # # Only A7 nonRepeating as test
+                # train_indices = [ 4, 2, 5, 10, 8, 1, 0, 7  ]  # 4-aes, 2-gcd, 5-ibex, 10-jpeg, 8-swerv_wr, 1-swerv, 0-dynamic, 7-eth
+                # test_indices =  [ 3, 6, 9 ] # uart, mockarray, riscv
+
+                # Fusion - 
+                # train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11, 18, 16, 19, 24, 22, 15, 14, 21 ]
+                # test_indices =  [ 0, 4, 5, 7, 9, 10, 17, 20, 23 ]
+
                 if FULLTRAIN:
                     train_indices = [ i for i in range( len( theDataset ) ) ]
                     test_indices = []
@@ -1574,53 +1619,70 @@ def runExperiment( setup ):
                 finalEpoch, maxMem, avergMem = train( train_dataloader, device, model, writerName )
                 finalEpoch += 1
 
-                print( '######################\n## Final Evaluation ##\n######################\n', flush = True )
+                print('######################\n## Final Evaluation ##\n######################\n', flush=True)
                 startTimeEval = time.time()
                 if not SKIPFINALEVAL:
                     if not FULLTRAIN:
-                        test_kendall, test_corrPearson, test_corrSpearman    = evaluate_in_batches( test_dataloader,  device, model )
+                        test_kendall, test_rmse, test_corrPearson, test_corrSpearman, test_precision, test_recall, test_f1, test_accuracy = evaluate_in_batches(test_dataloader, device, model)
                     else:
-                        # test_kendall = test_corrPearson = test_corrSpearman = torch.tensor([0]) #valid_kendall = valid_corrPearson = valid_corrSpearman =
-                        test_kendall = test_corrPearson = test_corrSpearman = 0
-                    train_kendall, train_corrPearson, train_corrSpearman = evaluate_in_batches( train_dataloader, device, model )
+                        test_kendall = test_rmse = test_corrPearson = test_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = 0
+                    train_kendall, train_corrPearson, train_corrSpearman, train_precision, train_recall, train_f1, train_accuracy = evaluate_in_batches(train_dataloader, device, model)
 
                     # TODO: improve this, problem when accessing each graph name with batched graphs
                     if DRAWOUTPUTS and mainIteration == 0: 
                         for n in test_indices:
-                            g = theDataset[ n ].to( device )
-                            path = theDataset.names[ n ]
-                            path = imageOutput + "/test-" + path +"-testIndex"+ '|'.join( map( str, test_indices ) )+"-e"+str( finalEpoch )+"-feat"+'|'.join( abbreviatedFeatures )
-                            evaluate_single( g, device, model, path ) #using only for drawing for now
+                            g = theDataset[n].to(device)
+                            path = theDataset.names[n]
+                            path = imageOutput + "/test-" + path + "-testIndex" + '|'.join(map(str, test_indices)) + "-e" + str(finalEpoch) + "-feat" + '|'.join(abbreviatedFeatures)
+                            evaluate_single(g, device, model, path)  # using only for drawing for now
                         for n in train_indices:
-                            g = theDataset[ n ].to( device )
-                            path = theDataset.names[ n ]
-                            path = imageOutput + "/train-" + path +"-trainIndex"+ '|'.join( map( str, train_indices ) )+"-e"+str( finalEpoch )+"-feat"+'|'.join( abbreviatedFeatures )
-                            evaluate_single( g, device, model, path ) #using only for drawing for now
+                            g = theDataset[n].to(device)
+                            path = theDataset.names[n]
+                            path = imageOutput + "/train-" + path + "-trainIndex" + '|'.join(map(str, train_indices)) + "-e" + str(finalEpoch) + "-feat" + '|'.join(abbreviatedFeatures)
+                            evaluate_single(g, device, model, path)  # using only for drawing for now
                 else:
-                    #test_kendall= test_corrPearson= test_corrSpearman= train_kendall= train_corrPearson= train_corrSpearman= torch.tensor([0]) #valid_kendall= valid_corrPearson= valid_corrSpearman=
-                    test_kendall= test_corrPearson= test_corrSpearman= train_kendall= train_corrPearson= train_corrSpearman= 0
+                    test_kendall = test_rmse = test_corrPearson = test_corrSpearman = train_kendall = train_corrPearson = train_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = train_precision = train_recall = train_f1 = train_accuracy = 0
 
-                print( "Total Train Kendall {:.4f}".format( train_kendall ) )
-                print( "Total Train CORRPEARSON {:.4f}".format( train_corrPearson ) )
-                print( "Total Train corrSpearman {:.4f}".format( train_corrSpearman ) )
-                print( "\n###############################\n## FinalEvalRuntime:", round( ( time.time() - startTimeEval ) / 60, 1) , "min ##\n###############################\n" )
-                iterationTime = round( ( time.time() - startIterationTime ) / 60, 1 )
-                print( "\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n", flush = True )
+                print("Total Train Kendall {:.4f}".format(train_kendall))
+                print("Total Train CORRPEARSON {:.4f}".format(train_corrPearson))
+                print("Total Train corrSpearman {:.4f}".format(train_corrSpearman))
+                print("Total Train Precision {:.4f}".format(train_precision))
+                print("Total Train Recall {:.4f}".format(train_recall))
+                print("Total Train F1 {:.4f}".format(train_f1))
+                print("Total Train Accuracy {:.4f}".format(train_accuracy))
 
-                kendallTest.append ( test_kendall  )
-                kendallTrain.append( train_kendall )
-                pearsonTrain.append( train_corrPearson )
-                spearmanTrain.append( train_corrSpearman )
-                with open( summary, 'a' ) as f:
-                    f.write( '|'.join(map(str, train_indices)) + ',' + '|'.join(map(str, test_indices)) + ","+str( finalEpoch )+","+str( iterationTime )+","+str( maxMem )+","+str( avergMem / finalEpoch ) )
-                    f.write( ","+ "| ".join( theDataset.getNames()[i] for i in test_indices ) +","+ str( train_kendall ) +","+ str( test_kendall ))
-                    f.write( "," + str( train_corrPearson ) +","+ str( test_corrPearson ) )
-                    f.write( "," + str( train_corrSpearman ) +","+ str( test_corrSpearman )  +"\n" )
+                print("Total Test Kendall {:.4f}".format(test_kendall))
+                print("Total Test RMSE {:.4f}".format(test_rmse))
+                print("Total Test CORRPEARSON {:.4f}".format(test_corrPearson))
+                print("Total Test corrSpearman {:.4f}".format(test_corrSpearman))
+                print("Total Test Precision {:.4f}".format(test_precision))
+                print("Total Test Recall {:.4f}".format(test_recall))
+                print("Total Test F1 {:.4f}".format(test_f1))
+                print("Total Test Accuracy {:.4f}".format(test_accuracy))
 
-                if CUDA:
+                print("\n###############################\n## FinalEvalRuntime:", round((time.time() - startTimeEval) / 60, 1), "min ##\n###############################\n")
+                iterationTime = round((time.time() - startIterationTime) / 60, 1)
+                print("\n###########################\n## IterRuntime:", iterationTime, "min ##\n###########################\n", flush=True)
+
+                kendallTest.append(test_kendall)
+                kendallTrain.append(train_kendall)
+                pearsonTrain.append(train_corrPearson)
+                spearmanTrain.append(train_corrSpearman)
+
+                with open(summary, 'a') as f:
+                    f.write('|'.join(map(str, train_indices)) + ',' + '|'.join(map(str, test_indices)) + "," + str(finalEpoch) + "," + str(iterationTime) + "," + str(maxMem) + "," + str(avergMem / finalEpoch))
+                    f.write("," + "| ".join(theDataset.getNames()[i] for i in test_indices) + "," + str(train_kendall) + "," + str(test_kendall))
+                    f.write("," + str(train_rmse) + "," + str(test_rmse))
+                    f.write("," + str(train_corrPearson) + "," + str(test_corrPearson))
+                    f.write("," + str(train_corrSpearman) + "," + str(test_corrSpearman))
+                    f.write("," + str(train_precision) + "," + str(test_precision))
+                    f.write("," + str(train_recall) + "," + str(test_recall))
+                    f.write("," + str(train_f1) + "," + str(test_f1))
+                    f.write("," + str(train_accuracy) + "," + str(test_accuracy) + "\n")
+
+                if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 if FULLTRAIN:
-                    break
                     break
                 if DOKFOLD:
                     del model
@@ -1629,11 +1691,13 @@ def runExperiment( setup ):
                 if FIXEDSPLIT:
                     break
 
-            # K fold loop end here
-            with open( summary, 'a' ) as f:
-                f.write( ",,,,,,Average," + str(   sum( kendallTrain ) / len( kendallTrain ) ) +","+ str( sum( kendallTest ) / len( kendallTest ) ) + "\n" )
-                f.write( ",,,,,,Median,"  + str(   statistics.median( kendallTrain ) ) +","+ str( statistics.median( kendallTest ) ) +"\n" )
-                f.write( ",,,,,,Std Dev," + ( str( statistics.stdev ( kendallTrain ) ) if len( kendallTrain ) > 1 else "N/A" ) +","+ ( str( statistics.stdev( kendallTest ) ) if len( kendallTest ) > 1 else "N/A" ) +"\n" )
+                # K fold loop end here
+                with open(summary, 'a') as f:
+                    #TODO add average and std dev for new metrics (MSE, precision, recall, etc...) for Kfold
+                    f.write(",,,,,,Average," + str(sum(kendallTrain) / len(kendallTrain)) + "," + str(sum(kendallTest) / len(kendallTest)) + "\n")
+                    f.write(",,,,,,Median," + str(statistics.median(kendallTrain)) + "," + str(statistics.median(kendallTest)) + "\n")
+                    f.write(",,,,,,Std Dev," + (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") + "," + (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n")
+
             if MIXEDTEST and LOADSECONDDS and not FUSIONDS:
                 ##################################################################################
                 ######################### MIXED TECHNOLOGY TESTING ###############################
@@ -1642,7 +1706,10 @@ def runExperiment( setup ):
                 startTimeMixedTest = time.time()
                 test_indices2 = [ i for i in range( len( secondDataset ) ) ]# if i !=2 and i !=4] # remove swerv and bp_be_top
                 test_dataloader2  = GraphDataLoader( secondDataset, batch_size = 1 )
-                test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
+
+                #test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
+                test_kendall2, test_corrPearson2, test_corrSpearman2, test_precision2, test_recall2, test_f12, test_accuracy2 = evaluate_in_batches( test_dataloader2,  device, model )
+
                 endTimeMixedTest = round( ( time.time() - startTimeMixedTest ) / 3600, 2 )
                 with open( summary, 'a' ) as f:
                     f.write( "mixed test:"+ dsAbbreviated2 +"," )
@@ -1705,6 +1772,6 @@ def runExperiment( setup ):
 if __name__ == '__main__':
     print( "\n\n-------------------------------\n---------Run setup 1 (NG first DS)----------\n-------------------------\n\n" )
     runExperiment( 1 )
-    if not FUSIONDS:
-        print( "\n\n-------------------------------\n---------Run setup 2 (A7 first DS)----------\n-------------------------\n\n" )
-        runExperiment( 2 )
+    # if not FUSIONDS:
+    #     print( "\n\n-------------------------------\n---------Run setup 2 (A7 first DS)----------\n-------------------------\n\n" )
+    #     runExperiment( 2 )
