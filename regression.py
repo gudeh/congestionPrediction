@@ -1626,7 +1626,7 @@ def runExperiment( setup ):
                         test_kendall, test_rmse, test_corrPearson, test_corrSpearman, test_precision, test_recall, test_f1, test_accuracy = evaluate_in_batches(test_dataloader, device, model)
                     else:
                         test_kendall = test_rmse = test_corrPearson = test_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = 0
-                    train_kendall, train_corrPearson, train_corrSpearman, train_precision, train_recall, train_f1, train_accuracy = evaluate_in_batches(train_dataloader, device, model)
+                    train_kendall, train_rmse, train_corrPearson, train_corrSpearman, train_precision, train_recall, train_f1, train_accuracy = evaluate_in_batches(train_dataloader, device, model)
 
                     # TODO: improve this, problem when accessing each graph name with batched graphs
                     if DRAWOUTPUTS and mainIteration == 0: 
@@ -1644,6 +1644,7 @@ def runExperiment( setup ):
                     test_kendall = test_rmse = test_corrPearson = test_corrSpearman = train_kendall = train_corrPearson = train_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = train_precision = train_recall = train_f1 = train_accuracy = 0
 
                 print("Total Train Kendall {:.4f}".format(train_kendall))
+                print("Total Train RMSE {:.4f}".format(train_rmse))
                 print("Total Train CORRPEARSON {:.4f}".format(train_corrPearson))
                 print("Total Train corrSpearman {:.4f}".format(train_corrSpearman))
                 print("Total Train Precision {:.4f}".format(train_precision))
@@ -1702,13 +1703,15 @@ def runExperiment( setup ):
                 ##################################################################################
                 ######################### MIXED TECHNOLOGY TESTING ###############################
                 ##################################################################################
+
+                #TODO: this is not tested after new metrics for TCAS1
                 print( '######################\n###### MIXED TEST ######\n######################\n', flush = True )
                 startTimeMixedTest = time.time()
                 test_indices2 = [ i for i in range( len( secondDataset ) ) ]# if i !=2 and i !=4] # remove swerv and bp_be_top
                 test_dataloader2  = GraphDataLoader( secondDataset, batch_size = 1 )
 
                 #test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
-                test_kendall2, test_corrPearson2, test_corrSpearman2, test_precision2, test_recall2, test_f12, test_accuracy2 = evaluate_in_batches( test_dataloader2,  device, model )
+                test_kendall2, test_rmse2, test_corrPearson2, test_corrSpearman2, test_precision2, test_recall2, test_f12, test_accuracy2 = evaluate_in_batches( test_dataloader2,  device, model )
 
                 endTimeMixedTest = round( ( time.time() - startTimeMixedTest ) / 3600, 2 )
                 with open( summary, 'a' ) as f:
@@ -1733,7 +1736,7 @@ def runExperiment( setup ):
                 if not MIXEDTEST:
                     f.write( "\n" )
                 else:
-                    f.write( ","+ str( test_kendall2 ) +","+ str( test_corrPearson2 ) +","+ str( test_corrSpearman2 ) + "\n" )
+                    f.write( ","+ str( test_kendall2 ) + ","+ str( test_rmse2 ) + ","+ str( test_corrPearson2 ) +","+ str( test_corrSpearman2 ) + "\n" )
                 
             folder_name = f"{str(abbreviatedFeatures)}-{mainIteration}"
             if DRAWOUTPUTS and mainIteration == 0:
