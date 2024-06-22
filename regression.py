@@ -50,6 +50,7 @@ externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'perco
 globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
 
 mainMaxIter      = 1
+runSetup         = 1
 FULLTRAIN        = False
 DOKFOLD          = True
 FIXEDSPLIT       = True
@@ -69,12 +70,11 @@ FUSIONDS        = False
 
 maxEpochs = 800
 minEpochs = 200
-# maxEpochs = 10
-# minEpochs = 10
+
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
-patience = 45  # Number of epochs without improvement to stop training
+patience = 50  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
 DOLEARN         = True
@@ -1774,7 +1774,7 @@ def runExperiment( setup ):
 
 if __name__ == '__main__':
     print( "\n\n-------------------------------\n---------Run setup 1 (NG first DS)----------\n-------------------------\n\n" )
-    runExperiment( 2 )
+    runExperiment( runSetup )
     # if not FUSIONDS:
     #     print( "\n\n-------------------------------\n---------Run setup 2 (A7 first DS)----------\n-------------------------\n\n" )
     #     runExperiment( 2 )
