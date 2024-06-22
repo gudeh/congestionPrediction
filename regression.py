@@ -49,7 +49,7 @@ validFeatures = [ 'closeness',  'betweenness' , 'eigen', 'pageRank', 'inDegree',
 externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' ]
 globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
 
-mainMaxIter      = 2
+mainMaxIter      = 1
 runSetup         = 1
 FULLTRAIN        = False
 DOKFOLD          = True
@@ -80,7 +80,7 @@ accumulation_steps = 4
 DOLEARN         = True
 REMOVEFAKERAM   = True
 
-DRAWOUTPUTS     = True # draw pred versus label after learn?
+DRAWOUTPUTS     = False # draw pred versus label after learn?
 DRAWGRAPHDATA   = False # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
