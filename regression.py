@@ -49,7 +49,7 @@ validFeatures = [ 'closeness',  'betweenness' , 'eigen', 'pageRank', 'inDegree',
 externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'percolation' ]
 globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
 
-mainMaxIter      = 1
+mainMaxIter      = 2
 runSetup         = 1
 FULLTRAIN        = False
 DOKFOLD          = True
@@ -80,7 +80,7 @@ accumulation_steps = 4
 DOLEARN         = True
 REMOVEFAKERAM   = True
 
-DRAWOUTPUTS     = False
+DRAWOUTPUTS     = True # draw pred versus label after learn?
 DRAWGRAPHDATA   = False # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
@@ -1120,8 +1120,8 @@ def evaluate(g, features, labels, model, path, device):
         print("\t>>>> labels in evaluate:", type(labels), labels.shape, labels[:10])
         print("\t>>>> predicted after squeeze:", type(predicted), predicted.shape, predicted[:10])
 
-        binary_preds = ((predicted > THRESHOLD) & (labels > THRESHOLD)).long()        
-        binary_labels = (labels > THRESHOLD).long()
+        binary_preds =  (predicted > THRESHOLD).long()        
+        binary_labels = (labels >    THRESHOLD).long()
 
         print("\t>>>> binary_preds:", binary_preds[:10])
         print("\t>>>> binary_labels:", binary_labels[:10])
