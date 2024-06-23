@@ -50,7 +50,7 @@ externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'perco
 globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
 
 mainMaxIter      = 1
-runSetup         = 1
+runSetup         = 2
 FULLTRAIN        = False
 DOKFOLD          = True
 FIXEDSPLIT       = True
@@ -70,17 +70,19 @@ FUSIONDS        = False
 
 maxEpochs = 800
 minEpochs = 200
+# maxEpochs = 10
+# minEpochs = 10
 
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
-patience = 50  # Number of epochs without improvement to stop training
+patience = 45  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
 DOLEARN         = True
 REMOVEFAKERAM   = True
 
-DRAWOUTPUTS     = False # draw pred versus label after learn?
+DRAWOUTPUTS     = True # draw pred versus label after learn?
 DRAWGRAPHDATA   = False # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
@@ -1215,7 +1217,7 @@ def evaluate_single( graph, device, model, path ):
     features = graph.ndata[ feat2d ].float().to( device )
     labels   = graph.ndata[ labelName ].to( device )
     print( "evaluate single--->", path )                               
-    score_kendall, corrPearson, _, corrSpearman, _ = evaluate( graph, features, labels, model, path, device )
+    score_kendall, rmse, corrPearson, _, corrSpearman, _ , precision, recall, f1, accuracy = evaluate( graph, features, labels, model, path, device )
     print( "Single graph score - Kendall:", score_kendall, ", corrPearson:", corrSpearman )
     return round( score_kendall.item(), 3 ), round( corrSpearman.item(), 3 ), round( corrPearson.item(), 3 )
 
@@ -1564,7 +1566,7 @@ def runExperiment( setup ):
 
                 # # Only A7 nonRepeating as test
                 train_indices = [ 4, 2, 5, 10, 8, 1, 0, 7  ]  # 4-aes, 2-gcd, 5-ibex, 10-jpeg, 8-swerv_wr, 1-swerv, 0-dynamic, 7-eth
-                test_indices =  [ 3, 6, 9 ] # uart, mockarray, riscv
+                test_indices =  [ 3, 9 ] # uart, mockarray, riscv
 
                 # Fusion - 
                 # train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11, 18, 16, 19, 24, 22, 15, 14, 21 ]
