@@ -50,7 +50,7 @@ externalCentralities = [ 'closeness', 'harmonic', 'betweenness', 'load',  'perco
 globalNormMode = 'oneZero' #'meanStd' #'oneZero'                         
 
 mainMaxIter      = 1
-runSetup         = 2
+runSetup         = 1
 FULLTRAIN        = False
 DOKFOLD          = True
 FIXEDSPLIT       = True
@@ -1460,6 +1460,7 @@ def runExperiment( setup ):
         ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen', 'inDegree', 'outDegree' ) ]
         ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen') ]
         ablationList += [ ( 'closeness', 'inDegree', 'outDegree' ) ]
+        ablationList += [ ( 'eigen', 'pageRank' , 'inDegree', 'outDegree')]
 
         
 
