@@ -82,7 +82,7 @@ accumulation_steps = 4
 DOLEARN         = True
 REMOVEFAKERAM   = True
 
-DRAWOUTPUTS     = True # draw pred versus label after learn?
+DRAWOUTPUTS     = False # draw pred versus label after learn?
 DRAWGRAPHDATA   = False # draws histograms and correlation matrix
 DRAWHEATCENTR   = False
 
@@ -1455,12 +1455,12 @@ def runExperiment( setup ):
         # # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'input_pins', 'output_pins')  ] # NG45 only, best corr with label
 
         #TCAS1 features
-        ablationList =   [('closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree', 'area', 'input_pins', 'output_pins')]
-        ablationList += [ ( 'area', 'input_pins', 'output_pins' ) ]
-        ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen', 'inDegree', 'outDegree' ) ]
-        ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen') ]
-        ablationList += [ ( 'closeness', 'inDegree', 'outDegree' ) ]
-        ablationList += [ ( 'eigen', 'pageRank' , 'inDegree', 'outDegree')]
+        # ablationList =   [('closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree', 'area', 'input_pins', 'output_pins')]
+        # ablationList += [ ( 'area', 'input_pins', 'output_pins' ) ]
+        # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen', 'inDegree', 'outDegree' ) ]
+        # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen') ]
+        # ablationList += [ ( 'closeness', 'inDegree', 'outDegree' ) ]
+        ablationList = [ ( 'eigen', 'pageRank' , 'inDegree', 'outDegree')]
 
         
 
@@ -1562,12 +1562,12 @@ def runExperiment( setup ):
                 # test_indices = [ i for i in range( len( theDataset ) ) if i != 7 ]  # black_parrot, 4:remove bp_be_top
 
                 # Only ng45 nonRepeating as test
-                # train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11 ]  # 6-aes, 3-gcd, ibex-8, 13-jpeg, 12-swerv_wr, 2-swerv, 1-dynamicNode, 11-eth
-                # test_indices =  [ 0, 4, 5, 7, 9, 10 ] # 0-bp_fe, 4-bp_be, 5-rocket, 7-bp, 9-ariane, bp_multi
+                train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11 ]  # 6-aes, 3-gcd, ibex-8, 13-jpeg, 12-swerv_wr, 2-swerv, 1-dynamicNode, 11-eth
+                test_indices =  [ 0, 4, 5, 7, 9, 10 ] # 0-bp_fe, 4-bp_be, 5-rocket, 7-bp, 9-ariane, bp_multi
 
                 # # Only A7 nonRepeating as test
-                train_indices = [ 4, 2, 5, 10, 8, 1, 0, 7  ]  # 4-aes, 2-gcd, 5-ibex, 10-jpeg, 8-swerv_wr, 1-swerv, 0-dynamic, 7-eth
-                test_indices =  [ 3, 9 ] # uart, mockarray, riscv
+                # train_indices = [ 4, 2, 5, 10, 8, 1, 0, 7  ]  # 4-aes, 2-gcd, 5-ibex, 10-jpeg, 8-swerv_wr, 1-swerv, 0-dynamic, 7-eth
+                # test_indices =  [ 3, 9 ] # uart, mockarray, riscv
 
                 # Fusion - 
                 # train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11, 18, 16, 19, 24, 22, 15, 14, 21 ]
