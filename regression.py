@@ -1151,6 +1151,12 @@ def evaluate(g, features, labels, model, path, device):
         score_kendall = kendall(predicted, labels)
         print("Kendall calculated", flush=True)
 
+        mae = F.l1_loss(predicted, labels).item()
+        print("Mean Absolute Error:", mae)
+
+        mape = (torch.abs((labels - predicted) / labels)).mean().item() * 100
+        print("Mean Absolute Percentage Error:", mape)
+
         predicted_cpu = predicted.cpu().detach().numpy()
         labels_cpu = labels.cpu().detach().numpy()
         corrPearson, pPearson = pearsonr(predicted_cpu, labels_cpu)
@@ -1169,7 +1175,7 @@ def evaluate(g, features, labels, model, path, device):
             memory_usage = 0
         print("memory usage in evaluate:", memory_usage)
 
-        return score_kendall, rmse, corrPearson, pPearson, corrSpearman, pSpearman, precision, recall, f1, accuracy
+        return score_kendall, rmse, corrPearson, pPearson, corrSpearman, pSpearman, precision, recall, f1, accuracy, mse, mae, mape
 
 def evaluate_in_batches(dataloader, device, model, image_path=""):
     total_kendall = 0.0
@@ -1180,6 +1186,8 @@ def evaluate_in_batches(dataloader, device, model, image_path=""):
     total_f1 = 0.0
     total_accuracy = 0.0
     total_rmse = 0.0
+    total_mae = 0.0
+    total_mape = 0.0
 
     for batch_id, batched_graph in enumerate(dataloader):
         print("batch_id (eval_in_batches):", batch_id)
@@ -1187,7 +1195,7 @@ def evaluate_in_batches(dataloader, device, model, image_path=""):
         features = batched_graph.ndata[feat2d].float().to(device)
         labels = batched_graph.ndata[labelName].to(device)
 
-        score_kendall, rmse, corrPearson, _, corrSpearman, _, precision, recall, f1, accuracy = evaluate(
+        score_kendall, rmse, corrPearson, _, corrSpearman, _, precision, recall, f1, accuracy, _, mae, mape = evaluate(
             batched_graph, features, labels, model, image_path, device)
         
         total_kendall += score_kendall
@@ -1197,7 +1205,9 @@ def evaluate_in_batches(dataloader, device, model, image_path=""):
         total_precision += precision
         total_recall += recall
         total_f1 += f1
-        total_accuracy += accuracy        
+        total_accuracy += accuracy
+        total_mae += mae
+        total_mape += mape
 
     num_batches = batch_id + 1
     avg_kendall = round(total_kendall.item() / num_batches, 3)
@@ -1208,18 +1218,23 @@ def evaluate_in_batches(dataloader, device, model, image_path=""):
     avg_recall = round(total_recall / num_batches, 3)
     avg_f1 = round(total_f1 / num_batches, 3)
     avg_accuracy = round(total_accuracy / num_batches, 3)
+    avg_mae = round(total_mae / num_batches, 3)
+    avg_mape = round(total_mape / num_batches, 3)
 
-    return avg_kendall, avg_rmse, avg_corrPearson, avg_corrSpearman, avg_precision, avg_recall, avg_f1, avg_accuracy
+    return avg_kendall, avg_rmse, avg_corrPearson, avg_corrSpearman, avg_precision, avg_recall, avg_f1, avg_accuracy, avg_mae, avg_mape
 
 
-def evaluate_single( graph, device, model, path ):
-    graph = graph.to( device )
-    features = graph.ndata[ feat2d ].float().to( device )
-    labels   = graph.ndata[ labelName ].to( device )
-    print( "evaluate single--->", path )                               
-    score_kendall, rmse, corrPearson, _, corrSpearman, _ , precision, recall, f1, accuracy = evaluate( graph, features, labels, model, path, device )
-    print( "Single graph score - Kendall:", score_kendall, ", corrPearson:", corrSpearman )
-    return round( score_kendall.item(), 3 ), round( corrSpearman.item(), 3 ), round( corrPearson.item(), 3 )
+def evaluate_single(graph, device, model, path):
+    graph = graph.to(device)
+    features = graph.ndata[feat2d].float().to(device)
+    labels = graph.ndata[labelName].to(device)
+    print("evaluate single--->", path)                               
+    score_kendall, rmse, corrPearson, _, corrSpearman, _, precision, recall, f1, accuracy, _, mae, mape = evaluate(
+        graph, features, labels, model, path, device)
+    print("Single graph score - Kendall:", score_kendall, ", corrPearson:", corrPearson, ", corrSpearman:", corrSpearman)
+    print("MAE:", mae, ", MAPE:", mape)
+    return round(score_kendall.item(), 3), round(corrPearson, 3), round(corrSpearman, 3), round(mae, 3), round(mape, 3)
+
 
 
 def train( train_dataloader, device, model, writerName ):
@@ -1509,7 +1524,7 @@ def runExperiment( setup ):
                 f.write( ",MANUALABLATION:" + str( MANUALABLATION ) )
                 f.write( ",improvement_threshold:" + str( improvement_threshold ) )
                 f.write( ",patience:" + str( patience ) )
-                f.write( "\ntrainIndices,testIndices,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Test,TrainKendall,TestKendall,trainRMSE,testRMSE,TrainPearson,TestPearson,TrainSpearman,TestSpearman,trainPrecision,testPrecision,trainRecall,testRecall,trainF1,testF1,trainAccuracy,testAccuracy\n" )
+                f.write( "\ntrainIndices,testIndices,finalEpoch,runtime(min),MaxMemory,AverageMemory,Circuit Test,TrainKendall,TestKendall,trainRMSE,testRMSE,trainMAE,testMAE,trainMAPE,testMAPE,TrainPearson,TestPearson,TrainSpearman,TestSpearman,trainPrecision,testPrecision,trainRecall,testRecall,trainF1,testF1,trainAccuracy,testAccuracy\n" )
 
             print( "\n%%%%%%%%%%%%%%%%%%%%%%%%%%\nablationIter:", type( ablationIter ), len( ablationIter ), ablationIter, "\n%%%%%%%%%%%%%%%%%%%%%%%%%%%\n", flush = True )
             ablationIter = list( ablationIter )
@@ -1631,10 +1646,10 @@ def runExperiment( setup ):
                 startTimeEval = time.time()
                 if not SKIPFINALEVAL:
                     if not FULLTRAIN:
-                        test_kendall, test_rmse, test_corrPearson, test_corrSpearman, test_precision, test_recall, test_f1, test_accuracy = evaluate_in_batches(test_dataloader, device, model)
+                        test_kendall, test_rmse, test_corrPearson, test_corrSpearman, test_precision, test_recall, test_f1, test_accuracy, test_mae, test_mape = evaluate_in_batches(test_dataloader, device, model)
                     else:
-                        test_kendall = test_rmse = test_corrPearson = test_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = 0
-                    train_kendall, train_rmse, train_corrPearson, train_corrSpearman, train_precision, train_recall, train_f1, train_accuracy = evaluate_in_batches(train_dataloader, device, model)
+                        test_kendall = test_rmse = test_corrPearson = test_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = test_mae = test_mape = 0
+                    train_kendall, train_rmse, train_corrPearson, train_corrSpearman, train_precision, train_recall, train_f1, train_accuracy, train_mae, train_mape = evaluate_in_batches(train_dataloader, device, model)
 
                     # TODO: improve this, problem when accessing each graph name with batched graphs
                     if DRAWOUTPUTS and mainIteration == 0: 
@@ -1649,25 +1664,29 @@ def runExperiment( setup ):
                             path = imageOutput + "/train-" + path + "-trainIndex" + '|'.join(map(str, train_indices)) + "-e" + str(finalEpoch) + "-feat" + '|'.join(abbreviatedFeatures)
                             evaluate_single(g, device, model, path)  # using only for drawing for now
                 else:
-                    test_kendall = test_rmse = test_corrPearson = test_corrSpearman = train_kendall = train_corrPearson = train_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = train_precision = train_recall = train_f1 = train_accuracy = 0
+                    test_kendall = test_rmse = test_corrPearson = test_corrSpearman = train_kendall = train_corrPearson = train_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = train_precision = train_recall = train_f1 = train_accuracy = test_mae = train_mae = test_mape = train_mape = 0
 
-                print("Total Train Kendall {:.4f}".format(train_kendall))
-                print("Total Train RMSE {:.4f}".format(train_rmse))
-                print("Total Train CORRPEARSON {:.4f}".format(train_corrPearson))
-                print("Total Train corrSpearman {:.4f}".format(train_corrSpearman))
-                print("Total Train Precision {:.4f}".format(train_precision))
-                print("Total Train Recall {:.4f}".format(train_recall))
-                print("Total Train F1 {:.4f}".format(train_f1))
-                print("Total Train Accuracy {:.4f}".format(train_accuracy))
-
-                print("Total Test Kendall {:.4f}".format(test_kendall))
-                print("Total Test RMSE {:.4f}".format(test_rmse))
-                print("Total Test CORRPEARSON {:.4f}".format(test_corrPearson))
-                print("Total Test corrSpearman {:.4f}".format(test_corrSpearman))
-                print("Total Test Precision {:.4f}".format(test_precision))
-                print("Total Test Recall {:.4f}".format(test_recall))
-                print("Total Test F1 {:.4f}".format(test_f1))
-                print("Total Test Accuracy {:.4f}".format(test_accuracy))
+               print("Total Train Kendall {:.4f}".format(train_kendall))
+               print("Total Train RMSE {:.4f}".format(train_rmse))
+               print("Total Train MAE {:.4f}".format(train_mae))
+               print("Total Train MAPE {:.4f}".format(train_mape))
+               print("Total Train CORRPEARSON {:.4f}".format(train_corrPearson))
+               print("Total Train corrSpearman {:.4f}".format(train_corrSpearman))
+               print("Total Train Precision {:.4f}".format(train_precision))
+               print("Total Train Recall {:.4f}".format(train_recall))
+               print("Total Train F1 {:.4f}".format(train_f1))
+               print("Total Train Accuracy {:.4f}".format(train_accuracy))
+               
+               print("Total Test Kendall {:.4f}".format(test_kendall))
+               print("Total Test RMSE {:.4f}".format(test_rmse))
+               print("Total Test MAE {:.4f}".format(test_mae))
+               print("Total Test MAPE {:.4f}".format(test_mape))
+               print("Total Test CORRPEARSON {:.4f}".format(test_corrPearson))
+               print("Total Test corrSpearman {:.4f}".format(test_corrSpearman))
+               print("Total Test Precision {:.4f}".format(test_precision))
+               print("Total Test Recall {:.4f}".format(test_recall))
+               print("Total Test F1 {:.4f}".format(test_f1))
+               print("Total Test Accuracy {:.4f}".format(test_accuracy))
 
                 print("\n###############################\n## FinalEvalRuntime:", round((time.time() - startTimeEval) / 60, 1), "min ##\n###############################\n")
                 iterationTime = round((time.time() - startIterationTime) / 60, 1)
@@ -1682,6 +1701,8 @@ def runExperiment( setup ):
                     f.write('|'.join(map(str, train_indices)) + ',' + '|'.join(map(str, test_indices)) + "," + str(finalEpoch) + "," + str(iterationTime) + "," + str(maxMem) + "," + str(avergMem / finalEpoch))
                     f.write("," + "| ".join(theDataset.getNames()[i] for i in test_indices) + "," + str(train_kendall) + "," + str(test_kendall))
                     f.write("," + str(train_rmse) + "," + str(test_rmse))
+                    f.write("," + str(train_mae) + "," + str(test_mae))
+                    f.write("," + str(train_mape) + "," + str(test_mape))
                     f.write("," + str(train_corrPearson) + "," + str(test_corrPearson))
                     f.write("," + str(train_corrSpearman) + "," + str(test_corrSpearman))
                     f.write("," + str(train_precision) + "," + str(test_precision))
@@ -1700,12 +1721,12 @@ def runExperiment( setup ):
                 if FIXEDSPLIT:
                     break
 
-                # K fold loop end here
-                with open(summary, 'a') as f:
-                    #TODO add average and std dev for new metrics (MSE, precision, recall, etc...) for Kfold
-                    f.write(",,,,,,Average," + str(sum(kendallTrain) / len(kendallTrain)) + "," + str(sum(kendallTest) / len(kendallTest)) + "\n")
-                    f.write(",,,,,,Median," + str(statistics.median(kendallTrain)) + "," + str(statistics.median(kendallTest)) + "\n")
-                    f.write(",,,,,,Std Dev," + (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") + "," + (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n")
+            # K fold loop end here
+            with open(summary, 'a') as f:
+                #TODO add average and std dev for new metrics (MSE, precision, recall, etc...) for Kfold
+                f.write(",,,,,,Average," + str(sum(kendallTrain) / len(kendallTrain)) + "," + str(sum(kendallTest) / len(kendallTest)) + "\n")
+                f.write(",,,,,,Median," + str(statistics.median(kendallTrain)) + "," + str(statistics.median(kendallTest)) + "\n")
+                f.write(",,,,,,Std Dev," + (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") + "," + (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n")
 
             if MIXEDTEST and LOADSECONDDS and not FUSIONDS:
                 ##################################################################################
@@ -1719,7 +1740,7 @@ def runExperiment( setup ):
                 test_dataloader2  = GraphDataLoader( secondDataset, batch_size = 1 )
 
                 #test_kendall2, test_corrPearson2, test_corrSpearman2    = evaluate_in_batches( test_dataloader2,  device, model )
-                test_kendall2, test_rmse2, test_corrPearson2, test_corrSpearman2, test_precision2, test_recall2, test_f12, test_accuracy2 = evaluate_in_batches( test_dataloader2,  device, model )
+                test_kendall2, test_rmse2, test_corrPearson2, test_corrSpearman2, test_precision2, test_recall2, test_f12, test_accuracy2, test_mae2, test_mape2 = evaluate_in_batches( test_dataloader2,  device, model )
 
                 endTimeMixedTest = round( ( time.time() - startTimeMixedTest ) / 3600, 2 )
                 with open( summary, 'a' ) as f:
@@ -1744,7 +1765,7 @@ def runExperiment( setup ):
                 if not MIXEDTEST:
                     f.write( "\n" )
                 else:
-                    f.write( ","+ str( test_kendall2 ) + ","+ str( test_rmse2 ) + ","+ str( test_corrPearson2 ) +","+ str( test_corrSpearman2 ) + "\n" )
+                    f.write( ","+ str( test_kendall2 ) +","+ str( test_rmse2 ) +","+ str( test_mae2 ) +","+ str( test_mape2 ) + ","+ str( test_corrPearson2 ) +","+ str( test_corrSpearman2 ) + "\n" )
                 
             folder_name = f"{str(abbreviatedFeatures)}-{mainIteration}"
             if DRAWOUTPUTS and mainIteration == 0:
