@@ -53,8 +53,8 @@ mainMaxIter      = 1
 runSetup         = 1
 FULLTRAIN        = False
 DOKFOLD          = True
-FIXEDSPLIT       = True
-num_folds        = 2
+FIXEDSPLIT       = False
+num_folds        = 4
 MANUALABLATION   = True
 
 stdCellFeats = [ 'type', 'area', 'input_pins', 'output_pins' ]
@@ -68,15 +68,15 @@ LOADSECONDDS    = False
 MIXEDTEST       = False
 FUSIONDS        = False
 
-maxEpochs = 800
-minEpochs = 200
+maxEpochs = 1
+minEpochs = 1
 # maxEpochs = 10
 # minEpochs = 10
 
 useEarlyStop = True
 step      = 0.005
 improvement_threshold = 0.000001 
-patience = 45  # Number of epochs without improvement to stop training
+patience = 40  # Number of epochs without improvement to stop training
 accumulation_steps = 4
 
 DOLEARN         = True
@@ -1455,12 +1455,13 @@ def runExperiment( setup ):
         # # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen' , 'input_pins', 'output_pins')  ] # NG45 only, best corr with label
 
         #TCAS1 features
-        # ablationList =   [('closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree', 'area', 'input_pins', 'output_pins')]
+        # feature set 1 from tcas1
+        ablationList =   [('closeness', 'betweenness', 'pageRank', 'eigen' , 'inDegree', 'outDegree', 'area', 'input_pins', 'output_pins')]
         # ablationList += [ ( 'area', 'input_pins', 'output_pins' ) ]
         # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen', 'inDegree', 'outDegree' ) ]
         # ablationList += [ ( 'closeness', 'betweenness', 'pageRank', 'eigen') ]
         # ablationList += [ ( 'closeness', 'inDegree', 'outDegree' ) ]
-        ablationList = [ ( 'eigen', 'pageRank' , 'inDegree', 'outDegree')]
+        ablationList += [ ( 'eigen', 'pageRank' , 'inDegree', 'outDegree')]
 
         
 
@@ -1562,8 +1563,8 @@ def runExperiment( setup ):
                 # test_indices = [ i for i in range( len( theDataset ) ) if i != 7 ]  # black_parrot, 4:remove bp_be_top
 
                 # Only ng45 nonRepeating as test
-                train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11 ]  # 6-aes, 3-gcd, ibex-8, 13-jpeg, 12-swerv_wr, 2-swerv, 1-dynamicNode, 11-eth
-                test_indices =  [ 0, 4, 5, 7, 9, 10 ] # 0-bp_fe, 4-bp_be, 5-rocket, 7-bp, 9-ariane, bp_multi
+                # train_indices = [ 6, 3, 8, 13, 12, 2, 1, 11 ]  # 6-aes, 3-gcd, ibex-8, 13-jpeg, 12-swerv_wr, 2-swerv, 1-dynamicNode, 11-eth
+                # test_indices =  [ 0, 4, 5, 7, 9, 10 ] # 0-bp_fe, 4-bp_be, 5-rocket, 7-bp, 9-ariane, bp_multi
 
                 # # Only A7 nonRepeating as test
                 # train_indices = [ 4, 2, 5, 10, 8, 1, 0, 7  ]  # 4-aes, 2-gcd, 5-ibex, 10-jpeg, 8-swerv_wr, 1-swerv, 0-dynamic, 7-eth
@@ -1576,6 +1577,10 @@ def runExperiment( setup ):
                 if FULLTRAIN:
                     train_indices = [ i for i in range( len( theDataset ) ) ]
                     test_indices = []
+
+                # remove some to match lascas fulltrain
+                # to_remove = [15, 22, 14, 9, 11, 12] #a7-> [swerv-15,swerv_wrapper-22,dynamic-14], ng45-> [ariane-9,ethmac-11,swerv_warpper-12]
+                # train_indices = [item for i, item in enumerate(train_indices) if i not in to_remove]
                 print(f"Fold {fold+1}/{num_folds}")
                 #train_indices, valid_indices = train_indices[:-len(test_indices)], train_indices[-len(test_indices):]
                         
