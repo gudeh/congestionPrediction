@@ -1544,6 +1544,7 @@ def runExperiment( setup ):
             kendallTrain = []
             pearsonTrain = []
             spearmanTrain = []
+            rmseTrain = rmseTest = maeTrain = maeTest = mapeTrain = mapeTest = []
             
             if not FUSIONDS:
                 theDataset    = DataSetFromYosys( listDir, ablationIter )
@@ -1666,27 +1667,27 @@ def runExperiment( setup ):
                 else:
                     test_kendall = test_rmse = test_corrPearson = test_corrSpearman = train_kendall = train_corrPearson = train_corrSpearman = test_precision = test_recall = test_f1 = test_accuracy = train_precision = train_recall = train_f1 = train_accuracy = test_mae = train_mae = test_mape = train_mape = 0
 
-               print("Total Train Kendall {:.4f}".format(train_kendall))
-               print("Total Train RMSE {:.4f}".format(train_rmse))
-               print("Total Train MAE {:.4f}".format(train_mae))
-               print("Total Train MAPE {:.4f}".format(train_mape))
-               print("Total Train CORRPEARSON {:.4f}".format(train_corrPearson))
-               print("Total Train corrSpearman {:.4f}".format(train_corrSpearman))
-               print("Total Train Precision {:.4f}".format(train_precision))
-               print("Total Train Recall {:.4f}".format(train_recall))
-               print("Total Train F1 {:.4f}".format(train_f1))
-               print("Total Train Accuracy {:.4f}".format(train_accuracy))
-               
-               print("Total Test Kendall {:.4f}".format(test_kendall))
-               print("Total Test RMSE {:.4f}".format(test_rmse))
-               print("Total Test MAE {:.4f}".format(test_mae))
-               print("Total Test MAPE {:.4f}".format(test_mape))
-               print("Total Test CORRPEARSON {:.4f}".format(test_corrPearson))
-               print("Total Test corrSpearman {:.4f}".format(test_corrSpearman))
-               print("Total Test Precision {:.4f}".format(test_precision))
-               print("Total Test Recall {:.4f}".format(test_recall))
-               print("Total Test F1 {:.4f}".format(test_f1))
-               print("Total Test Accuracy {:.4f}".format(test_accuracy))
+                print("Total Train Kendall {:.4f}".format(train_kendall))
+                print("Total Train RMSE {:.4f}".format(train_rmse))
+                print("Total Train MAE {:.4f}".format(train_mae))
+                print("Total Train MAPE {:.4f}".format(train_mape))
+                print("Total Train CORRPEARSON {:.4f}".format(train_corrPearson))
+                print("Total Train corrSpearman {:.4f}".format(train_corrSpearman))
+                print("Total Train Precision {:.4f}".format(train_precision))
+                print("Total Train Recall {:.4f}".format(train_recall))
+                print("Total Train F1 {:.4f}".format(train_f1))
+                print("Total Train Accuracy {:.4f}".format(train_accuracy))
+
+                print("Total Test Kendall {:.4f}".format(test_kendall))
+                print("Total Test RMSE {:.4f}".format(test_rmse))
+                print("Total Test MAE {:.4f}".format(test_mae))
+                print("Total Test MAPE {:.4f}".format(test_mape))
+                print("Total Test CORRPEARSON {:.4f}".format(test_corrPearson))
+                print("Total Test corrSpearman {:.4f}".format(test_corrSpearman))
+                print("Total Test Precision {:.4f}".format(test_precision))
+                print("Total Test Recall {:.4f}".format(test_recall))
+                print("Total Test F1 {:.4f}".format(test_f1))
+                print("Total Test Accuracy {:.4f}".format(test_accuracy))
 
                 print("\n###############################\n## FinalEvalRuntime:", round((time.time() - startTimeEval) / 60, 1), "min ##\n###############################\n")
                 iterationTime = round((time.time() - startIterationTime) / 60, 1)
@@ -1696,6 +1697,12 @@ def runExperiment( setup ):
                 kendallTrain.append(train_kendall)
                 pearsonTrain.append(train_corrPearson)
                 spearmanTrain.append(train_corrSpearman)
+                rmseTrain.append(train_rmse)
+                rmseTest.append(test_rmse)
+                maeTrain.append(train_mae)
+                maeTest.append(test_mae)
+                mapeTrain.append(train_mape)
+                mapeTest.append(test_mape)
 
                 with open(summary, 'a') as f:
                     f.write('|'.join(map(str, train_indices)) + ',' + '|'.join(map(str, test_indices)) + "," + str(finalEpoch) + "," + str(iterationTime) + "," + str(maxMem) + "," + str(avergMem / finalEpoch))
@@ -1722,11 +1729,31 @@ def runExperiment( setup ):
                     break
 
             # K fold loop end here
+            # with open(summary, 'a') as f:
+            #     f.write(",,,,,,Average," + str(sum(kendallTrain) / len(kendallTrain)) + "," + str(sum(kendallTest) / len(kendallTest)) + "\n")
+            #     f.write(",,,,,,Median," + str(statistics.median(kendallTrain)) + "," + str(statistics.median(kendallTest)) + "\n")
+            #     f.write(",,,,,,Std Dev," + (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") + "," + (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n")
+
             with open(summary, 'a') as f:
-                #TODO add average and std dev for new metrics (MSE, precision, recall, etc...) for Kfold
-                f.write(",,,,,,Average," + str(sum(kendallTrain) / len(kendallTrain)) + "," + str(sum(kendallTest) / len(kendallTest)) + "\n")
-                f.write(",,,,,,Median," + str(statistics.median(kendallTrain)) + "," + str(statistics.median(kendallTest)) + "\n")
-                f.write(",,,,,,Std Dev," + (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") + "," + (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") + "\n")
+                # Writing the averages
+                f.write(",,,,,,Average," + str(sum(kendallTrain) / len(kendallTrain)) + "," + str(sum(kendallTest) / len(kendallTest)) +
+                        "," + str(sum(rmseTrain) / len(rmseTrain)) + "," + str(sum(rmseTest) / len(rmseTest)) +
+                        "," + str(sum(maeTrain) / len(maeTrain)) + "," + str(sum(maeTest) / len(maeTest)) +
+                        "," + str(sum(mapeTrain) / len(mapeTrain)) + "," + str(sum(mapeTest) / len(mapeTest)) + "\n")
+
+                # Writing the medians
+                f.write(",,,,,,Median," + str(statistics.median(kendallTrain)) + "," + str(statistics.median(kendallTest)) +
+                        "," + str(statistics.median(rmseTrain)) + "," + str(statistics.median(rmseTest)) +
+                        "," + str(statistics.median(maeTrain)) + "," + str(statistics.median(maeTest)) +
+                        "," + str(statistics.median(mapeTrain)) + "," + str(statistics.median(mapeTest)) + "\n")
+
+                # Writing the standard deviations
+                f.write(",,,,,,Std Dev," + (str(statistics.stdev(kendallTrain)) if len(kendallTrain) > 1 else "N/A") + "," + (str(statistics.stdev(kendallTest)) if len(kendallTest) > 1 else "N/A") +
+                        "," + (str(statistics.stdev(rmseTrain)) if len(rmseTrain) > 1 else "N/A") + "," + (str(statistics.stdev(rmseTest)) if len(rmseTest) > 1 else "N/A") +
+                        "," + (str(statistics.stdev(maeTrain)) if len(maeTrain) > 1 else "N/A") + "," + (str(statistics.stdev(maeTest)) if len(maeTest) > 1 else "N/A") +
+                        "," + (str(statistics.stdev(mapeTrain)) if len(mapeTrain) > 1 else "N/A") + "," + (str(statistics.stdev(mapeTest)) if len(mapeTest) > 1 else "N/A") + "\n")
+
+
 
             if MIXEDTEST and LOADSECONDDS and not FUSIONDS:
                 ##################################################################################
