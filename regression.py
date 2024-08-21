@@ -68,8 +68,8 @@ LOADSECONDDS    = False
 MIXEDTEST       = False
 FUSIONDS        = False
 
-maxEpochs = 1
-minEpochs = 1
+maxEpochs = 800
+minEpochs = 200
 # maxEpochs = 10
 # minEpochs = 10
 
